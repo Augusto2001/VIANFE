@@ -1,0 +1,16 @@
+{
+  "name": "app_xml_antigravity",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de Gestão e Download Automático de XML/PDF Fiscal para Escritórios de Contabilidade",
+  "scripts": {
+    "dev": "concurrently \"npm.cmd run dev:server\" \"npm.cmd run dev:client\"",
+    "dev:server": "npm.cmd run --prefix server dev",
+    "dev:client": "npm.cmd run --prefix client dev",
+    "build": "npm.cmd run --prefix server build && npm.cmd run --prefix client build",
+    "start": "npm.cmd run --prefix server start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
