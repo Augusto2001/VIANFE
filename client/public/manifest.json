@@ -1,0 +1,74 @@
+{
+  "name": "Super App Viacont - BPO & Fiscal",
+  "short_name": "Viacont",
+  "description": "Super App de BPO Financeiro, Emissão de Notas Fiscais e Gestão Contábil Inteligente.",
+  "start_url": "/?pwa=true",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Emitir Nota Fiscal",
+      "short_name": "Emitir Nota",
+      "description": "Emissão guiada em 3 passos de NFS-e ou NF-e",
+      "url": "/?tab=emitir_notas",
+      "icons": [
+        {
+          "src": "/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Pagar Impostos PIX",
+      "short_name": "Pagar PIX",
+      "description": "Guias de tributos com código copia-e-cola",
+      "url": "/?tab=guias_impostos",
+      "icons": [
+        {
+          "src": "/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Scanner de Recibos",
+      "short_name": "Scanner OCR",
+      "description": "Tirar foto de recibos e cupons",
+      "url": "/?tab=recibos_scanner",
+      "icons": [
+        {
+          "src": "/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Radar de Caixa 48h",
+      "short_name": "Radar 48h",
+      "description": "Avisos de contas a pagar nos próximos dias",
+      "url": "/?tab=inicio_financas",
+      "icons": [
+        {
+          "src": "/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
