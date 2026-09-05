@@ -632,6 +632,50 @@ export const api = {
     return json.data;
   },
 
+  // Open Finance & Sincronização Bancária Plug & Play
+  async getOpenFinanceInfo(companyId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/open-finance/info?company_id=${companyId}`, {
+      headers: getAuthHeaders()
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Falha ao buscar configurações de Open Finance');
+    return json.data;
+  },
+
+  async sendOpenFinanceWebhook(companyId: string, payload: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/open-finance/webhook/${companyId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || json.message || 'Falha na ingestão Open Finance');
+    return json;
+  },
+
+  // Mapeador de Plano de Contas Domínio Sistemas
+  async autoMapChartOfAccounts(companyId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/chart-of-accounts/auto-map`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ company_id: companyId })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || json.message || 'Falha ao executar auto-mapeamento');
+    return json;
+  },
+
+  async updateCategoryMapping(id: string, mapping: { conta_debito_dominio?: string; conta_credito_dominio?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/categories/${id}/mapping`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(mapping)
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || json.message || 'Falha ao atualizar mapeamento');
+    return json;
+  },
+
   // Suporte Técnico & Central de Chamados WhatsApp
   async createSupportTicket(data: { solicitante_nome: string; solicitante_phone: string; company_id?: string; company_name?: string; tipo_demanda: string; mensagem_erro: string }): Promise<any> {
     const res = await fetch(`${API_BASE}/support/tickets`, {

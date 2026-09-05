@@ -81,6 +81,14 @@ router.get('/bpo/alerts/upcoming', verifyJwtAndTenant, bpoController.getUpcoming
 router.post('/bpo/alerts/send-whatsapp', verifyJwtAndTenant, bpoController.sendPredictiveAlertWhatsApp);
 router.get('/bpo/alerts/history', verifyJwtAndTenant, bpoController.getAlertsHistory);
 
+// Open Finance Plug & Play & Webhook Bancário
+router.post('/bpo/open-finance/webhook/:companyId', bpoController.handleOpenFinanceWebhook);
+router.get('/bpo/open-finance/info', verifyJwtAndTenant, bpoController.getOpenFinanceInfo);
+
+// Mapeador de Plano de Contas Domínio Sistemas
+router.post('/bpo/chart-of-accounts/auto-map', verifyJwtAndTenant, bpoController.autoMapChartOfAccounts);
+router.put('/bpo/categories/:id/mapping', verifyJwtAndTenant, bpoController.updateCategoryMapping);
+
 // NF-e Manifestação do Destinatário Routes (Protected by JWT & Tenant)
 router.post('/portal/manifest', verifyJwtAndTenant, manifestacaoController.submitManifestation);
 router.get('/portal/manifestations/:invoiceId', verifyJwtAndTenant, manifestacaoController.getManifestations);

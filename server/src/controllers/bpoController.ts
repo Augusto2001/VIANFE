@@ -3,6 +3,7 @@ import { db } from '../database/db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { parseOfx } from '../services/ofxParser.js';
 import { predictiveAlertsService } from '../services/predictiveAlertsService.js';
+import { openFinanceService } from '../services/openFinanceService.js';
 
 export const bpoController = {
   // 1. List bank accounts
@@ -832,6 +833,93 @@ export const bpoController = {
       const l = limit ? parseInt(limit as string, 10) : 20;
       const history = predictiveAlertsService.getAlertsHistory(company_id as string, l);
       res.json({ success: true, data: history });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 13. OPEN FINANCE PLUG & PLAY & WEBHOOKS BANCÁRIOS
+  async handleOpenFinanceWebhook(req: Request, res: Response): Promise<void> {
+    try {
+      const companyId = String(req.params.companyId || req.query.company_id || '');
+      if (!companyId) {
+        res.status(400).json({ error: 'company_id é obrigatório para ingestão Open Finance' });
+        return;
+      }
+
+      const result = await openFinanceService.processWebhookTransactions(companyId, req.body);
+      res.json({
+        success: true,
+        message: `${result.processed} transações processadas com sucesso! (${result.duplicates} duplicadas ignoradas)`,
+        data: result
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  async getOpenFinanceInfo(req: Request, res: Response): Promise<void> {
+    try {
+      const { company_id } = req.query;
+      if (!company_id) {
+        res.status(400).json({ error: 'company_id é obrigatório' });
+        return;
+      }
+
+      const webhookUrl = `https://vianfe.viacont.com/api/bpo/open-finance/webhook/${company_id}`;
+      const totalTransactions = db.prepare(`
+        SELECT count(*) as count, max(created_at) as last_sync 
+        FROM bank_transactions 
+        WHERE company_id = ? AND observacoes_cliente LIKE '%Open Finance%'
+      `).get(company_id as string) as any;
+
+      res.json({
+        success: true,
+        data: {
+          webhookUrl,
+          supportedBanks: ['Banco Inter', 'Cora PJ', 'Asaas', 'Itaú Empresas', 'Nubank PJ', 'Pluggy'],
+          totalSynced: totalTransactions?.count || 0,
+          lastSync: totalTransactions?.last_sync || null
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 14. MAPEADOR VISUAL DE PLANO DE CONTAS DOMÍNIO SISTEMAS
+  async autoMapChartOfAccounts(req: Request, res: Response): Promise<void> {
+    try {
+      const { company_id } = req.body;
+      if (!company_id) {
+        res.status(400).json({ error: 'company_id é obrigatório' });
+        return;
+      }
+
+      const result = await openFinanceService.autoMapChartOfAccounts(company_id as string);
+      res.json({
+        success: true,
+        message: `${result.mapped} categorias mapeadas automaticamente com o plano de contas da Domínio Sistemas!`,
+        data: result
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  async updateCategoryMapping(req: Request, res: Response): Promise<void> {
+    try {
+      const id = String(req.params.id);
+      const { conta_debito_dominio, conta_credito_dominio } = req.body;
+
+      db.prepare(`
+        UPDATE financial_categories 
+        SET conta_debito_dominio = ?, conta_credito_dominio = ?
+        WHERE id = ?
+      `).run(conta_debito_dominio || null, conta_credito_dominio || null, id);
+
+      const updated = db.prepare('SELECT * FROM financial_categories WHERE id = ?').get(id);
+      res.json({ success: true, message: 'Mapeamento contábil atualizado com sucesso!', data: updated });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
