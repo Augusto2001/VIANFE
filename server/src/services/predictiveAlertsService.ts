@@ -100,7 +100,7 @@ export const predictiveAlertsService = {
         SELECT * FROM invoices 
         WHERE company_id = ? 
           AND tipo = 'entrada'
-          AND (situacao IS NULL OR situacao != 'CANCELADA')
+          AND (status IS NULL OR status != 'cancelada')
         ORDER BY data_emissao DESC
         LIMIT 100
       `).all(companyId) as any[];

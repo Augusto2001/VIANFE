@@ -57,6 +57,14 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     const width = 565;
     let y = 15;
 
+    // Multi-page DANFE parameters
+    const items = invoice.itens || [];
+    const itemsOnPage1 = 8;
+    const itemsOnFollowPage = 28;
+    const remainingItems = Math.max(0, items.length - itemsOnPage1);
+    const followPages = Math.ceil(remainingItems / itemsOnFollowPage);
+    const totalPages = Math.max(1, 1 + followPages);
+
     // =========================================================================
     // 1. CANHOTO DE RECEBIMENTO (Padrão Nacional SEFAZ)
     // =========================================================================
@@ -119,9 +127,9 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     doc.fontSize(9).font('Helvetica-Bold').text(isSaida ? '1' : '0', left + 285, y + 37, { align: 'center', width: 15 });
 
     doc.fontSize(7).font('Helvetica-Bold');
-    doc.text(`Nº ${invoice.numero}`, left + 225, y + 62, { align: 'center', width: 105 });
-    doc.fontSize(6).text(`SÉRIE ${invoice.serie}`, left + 225, y + 72, { align: 'center', width: 105 });
-    doc.fontSize(5.5).font('Helvetica').text('FOLHA 1/1', left + 225, y + 82, { align: 'center', width: 105 });
+    doc.text(`Nº ${invoice.numero || '0'}`, left + 225, y + 62, { align: 'center', width: 105 });
+    doc.fontSize(6).text(`SÉRIE ${invoice.serie || '1'}`, left + 225, y + 72, { align: 'center', width: 105 });
+    doc.fontSize(5.5).font('Helvetica').text(`FOLHA 1/${totalPages}`, left + 225, y + 82, { align: 'center', width: 105 });
 
     // Box 3: Chave de Acesso & Código de Barras (Right)
     doc.rect(left + 330, y, width - 330, headerHeight).stroke('#000000');
@@ -490,66 +498,189 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     y += 12;
 
     // Items List
-    const maxItems = Math.min(invoice.itens.length, 12);
     const itemHeight = 11;
 
-    for (let i = 0; i < maxItems; i++) {
-      const it = invoice.itens[i];
-      doc.rect(left, y, width, itemHeight).stroke('#cbd5e1');
-      doc.fontSize(5).font('Helvetica').fillColor('#000000');
+    // Helper to render Dados Adicionais / Informações Complementares
+    const renderAdditionalData = (currentY: number) => {
+      currentY += 5;
+      doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS ADICIONAIS', left, currentY);
+      currentY += 7;
 
-      let itemX = left + 2;
-      doc.text(it.codigo.substring(0, 10), itemX, y + 2, { width: colW.cod });
-      itemX += colW.cod;
-      doc.text(it.descricao.substring(0, 52), itemX, y + 2, { width: colW.desc, ellipsis: true });
-      itemX += colW.desc;
-      doc.text(it.ncm || '', itemX, y + 2, { width: colW.ncm });
-      itemX += colW.ncm;
-      doc.text(it.icms?.cst || (it as any).cst || '000', itemX, y + 2, { width: colW.cst });
-      itemX += colW.cst;
-      doc.text(it.cfop || '', itemX, y + 2, { width: colW.cfop });
-      itemX += colW.cfop;
-      doc.text(it.unidade || 'UN', itemX, y + 2, { width: colW.un });
-      itemX += colW.un;
-      doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, y + 2, { width: colW.qtd, align: 'right' });
-      itemX += colW.qtd;
-      doc.text(formatCurrency(it.valorUnitario), itemX, y + 2, { width: colW.vunit, align: 'right' });
-      itemX += colW.vunit;
-      doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, y + 2, { width: colW.vtotal, align: 'right' });
-      itemX += colW.vtotal;
-      doc.font('Helvetica').text(formatCurrency(it.icms?.baseCalculo), itemX, y + 2, { width: colW.bcicms, align: 'right' });
-      itemX += colW.bcicms;
-      doc.text(formatCurrency(it.icms?.valor), itemX, y + 2, { width: colW.vicms, align: 'right' });
-      itemX += colW.vicms;
-      doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, y + 2, { width: colW.aliq, align: 'right' });
+      const addHeight = Math.max(50, 780 - currentY);
+      doc.rect(left, currentY, 380, addHeight).stroke('#000000');
+      doc.fontSize(4.5).font('Helvetica-Bold').text('INFORMAÇÕES COMPLEMENTARES', left + 3, currentY + 2);
+      
+      const obsText = invoice.informacoesComplementares || 'Documento emitido por ME ou EPP optante pelo Simples Nacional ou Regime Normal. Permite o aproveitamento do crédito de ICMS correspondente na forma da lei.';
+      doc.fontSize(5).font('Helvetica').text(
+        obsText,
+        left + 3,
+        currentY + 10,
+        { width: 374, height: addHeight - 12 }
+      );
 
-      y += itemHeight;
+      doc.rect(left + 380, currentY, width - 380, addHeight).stroke('#000000');
+      doc.fontSize(4.5).font('Helvetica-Bold').text('RESERVADO AO FISCO', left + 383, currentY + 2);
+      if (invoice.informacoesFisco) {
+        doc.fontSize(5).font('Helvetica').text(invoice.informacoesFisco, left + 383, currentY + 10, { width: width - 386, height: addHeight - 12 });
+      }
+    };
+
+    // Helper to render Table Header on any sheet
+    const renderTableHeader = (currentY: number) => {
+      doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVIÇOS', left, currentY);
+      currentY += 7;
+
+      doc.rect(left, currentY, width, 12).fillAndStroke('#f8fafc', '#000000');
+      doc.fontSize(4.5).font('Helvetica-Bold').fillColor('#000000');
+      
+      let curX = left + 2;
+      doc.text('CÓDIGO', curX, currentY + 3, { width: colW.cod });
+      curX += colW.cod;
+      doc.text('DESCRIÇÃO DO PRODUTO / SERVIÇO', curX, currentY + 3, { width: colW.desc });
+      curX += colW.desc;
+      doc.text('NCM/SH', curX, currentY + 3, { width: colW.ncm });
+      curX += colW.ncm;
+      doc.text('CST', curX, currentY + 3, { width: colW.cst });
+      curX += colW.cst;
+      doc.text('CFOP', curX, currentY + 3, { width: colW.cfop });
+      curX += colW.cfop;
+      doc.text('UN', curX, currentY + 3, { width: colW.un });
+      curX += colW.un;
+      doc.text('QTD.', curX, currentY + 3, { width: colW.qtd, align: 'right' });
+      curX += colW.qtd;
+      doc.text('V. UNIT.', curX, currentY + 3, { width: colW.vunit, align: 'right' });
+      curX += colW.vunit;
+      doc.text('V. TOTAL', curX, currentY + 3, { width: colW.vtotal, align: 'right' });
+      curX += colW.vtotal;
+      doc.text('BC ICMS', curX, currentY + 3, { width: colW.bcicms, align: 'right' });
+      curX += colW.bcicms;
+      doc.text('V. ICMS', curX, currentY + 3, { width: colW.vicms, align: 'right' });
+      curX += colW.vicms;
+      doc.text('ALÍQ.', curX, currentY + 3, { width: colW.aliq, align: 'right' });
+
+      return currentY + 12;
+    };
+
+    // Render Page 1 Items
+    if (items.length === 0) {
+      doc.rect(left, y, width, 40).stroke('#cbd5e1');
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#b91c1c');
+      doc.text('NOTA FISCAL CAPTURADA EM RESUMO NA SEFAZ (resNFe)', left + 10, y + 10, { align: 'center', width: width - 20 });
+      doc.fontSize(6).font('Helvetica').fillColor('#334155');
+      doc.text('Para exibir todos os itens, NCMs e detalhamento completo de impostos neste DANFE, realize a Manifestação do Destinatário (Ciência da Emissão) no painel.', left + 10, y + 22, { align: 'center', width: width - 20 });
+      y += 45;
+    } else {
+      const page1Limit = Math.min(items.length, itemsOnPage1);
+      for (let i = 0; i < page1Limit; i++) {
+        const it = items[i];
+        doc.rect(left, y, width, itemHeight).stroke('#cbd5e1');
+        doc.fontSize(5).font('Helvetica').fillColor('#000000');
+
+        let itemX = left + 2;
+        doc.text(String(it.codigo || '').substring(0, 10), itemX, y + 2, { width: colW.cod });
+        itemX += colW.cod;
+        doc.text(String(it.descricao || '').substring(0, 52), itemX, y + 2, { width: colW.desc, ellipsis: true });
+        itemX += colW.desc;
+        doc.text(it.ncm || '', itemX, y + 2, { width: colW.ncm });
+        itemX += colW.ncm;
+        doc.text(it.icms?.cst || (it as any).cst || '000', itemX, y + 2, { width: colW.cst });
+        itemX += colW.cst;
+        doc.text(it.cfop || '', itemX, y + 2, { width: colW.cfop });
+        itemX += colW.cfop;
+        doc.text(it.unidade || 'UN', itemX, y + 2, { width: colW.un });
+        itemX += colW.un;
+        doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, y + 2, { width: colW.qtd, align: 'right' });
+        itemX += colW.qtd;
+        doc.text(formatCurrency(it.valorUnitario), itemX, y + 2, { width: colW.vunit, align: 'right' });
+        itemX += colW.vunit;
+        doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, y + 2, { width: colW.vtotal, align: 'right' });
+        itemX += colW.vtotal;
+        doc.font('Helvetica').text(formatCurrency(it.icms?.baseCalculo), itemX, y + 2, { width: colW.bcicms, align: 'right' });
+        itemX += colW.bcicms;
+        doc.text(formatCurrency(it.icms?.valor), itemX, y + 2, { width: colW.vicms, align: 'right' });
+        itemX += colW.vicms;
+        doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, y + 2, { width: colW.aliq, align: 'right' });
+
+        y += itemHeight;
+      }
     }
 
-    y += 5;
+    if (totalPages === 1) {
+      renderAdditionalData(y);
+    }
 
     // =========================================================================
-    // 9. DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES
+    // MULTI-PAGE DANFE: SUBSEQUENT SHEETS (FOLHA 2/N, 3/N, ...)
     // =========================================================================
-    doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS ADICIONAIS', left, y);
-    y += 7;
+    let currentItemIdx = itemsOnPage1;
 
-    const addHeight = Math.max(50, 780 - y);
-    doc.rect(left, y, 380, addHeight).stroke('#000000');
-    doc.fontSize(4.5).font('Helvetica-Bold').text('INFORMAÇÕES COMPLEMENTARES', left + 3, y + 2);
-    
-    const obsText = invoice.informacoesComplementares || 'Documento emitido por ME ou EPP optante pelo Simples Nacional ou Regime Normal. Permite o aproveitamento do crédito de ICMS correspondente na forma da lei.';
-    doc.fontSize(5).font('Helvetica').text(
-      obsText,
-      left + 3,
-      y + 10,
-      { width: 374, height: addHeight - 12 }
-    );
+    for (let pageNum = 2; pageNum <= totalPages; pageNum++) {
+      doc.addPage({ size: 'A4', margin: 15 });
+      let pageY = 15;
 
-    doc.rect(left + 380, y, width - 380, addHeight).stroke('#000000');
-    doc.fontSize(4.5).font('Helvetica-Bold').text('RESERVADO AO FISCO', left + 383, y + 2);
-    if (invoice.informacoesFisco) {
-      doc.fontSize(5).font('Helvetica').text(invoice.informacoesFisco, left + 383, y + 10, { width: width - 386, height: addHeight - 12 });
+      const followHeaderH = 45;
+      
+      // Box 1: Emitente Resumido
+      doc.rect(left, pageY, 225, followHeaderH).stroke('#000000');
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#000000');
+      doc.text((invoice.emitente?.razaoSocial || 'EMITENTE').toUpperCase(), left + 5, pageY + 4, { width: 215, ellipsis: true });
+      doc.fontSize(6).font('Helvetica');
+      doc.text(`CNPJ: ${formatCNPJ(invoice.emitente?.cnpjCpf || '')} | IE: ${invoice.emitente?.ie || 'ISENTO'}`, left + 5, pageY + 20, { width: 215 });
+      doc.text(`${invoice.emitente?.municipio || ''} - ${invoice.emitente?.uf || ''}`, left + 5, pageY + 30, { width: 215 });
+
+      // Box 2: DANFE Central Box
+      doc.rect(left + 225, pageY, 105, followHeaderH).stroke('#000000');
+      doc.fontSize(10).font('Helvetica-Bold').text('DANFE', left + 225, pageY + 3, { align: 'center', width: 105 });
+      doc.fontSize(5.5).font('Helvetica').text(`Nº ${invoice.numero || '0'} | SÉRIE ${invoice.serie || '1'}`, left + 225, pageY + 16, { align: 'center', width: 105 });
+      doc.fontSize(6).font('Helvetica-Bold').text(`FOLHA ${pageNum}/${totalPages}`, left + 225, pageY + 28, { align: 'center', width: 105 });
+
+      // Box 3: Chave de Acesso
+      doc.rect(left + 330, pageY, width - 330, followHeaderH).stroke('#000000');
+      doc.fontSize(5).font('Helvetica-Bold').text('CHAVE DE ACESSO', left + 335, pageY + 4);
+      doc.fontSize(6.5).font('Courier-Bold').text(formatChaveAcesso(invoice.chaveAcesso), left + 335, pageY + 12, { width: width - 340 });
+      doc.fontSize(5.5).font('Helvetica').text(`Protocolo: ${invoice.protocoloAutorizacao || 'AUTORIZADA'} - ${formatDateTime(invoice.dataAutorizacao)}`, left + 335, pageY + 28);
+
+      pageY += followHeaderH + 6;
+
+      pageY = renderTableHeader(pageY);
+
+      const itemsForThisPage = Math.min(items.length - currentItemIdx, itemsOnFollowPage);
+      for (let k = 0; k < itemsForThisPage; k++) {
+        const it = items[currentItemIdx++];
+        doc.rect(left, pageY, width, itemHeight).stroke('#cbd5e1');
+        doc.fontSize(5).font('Helvetica').fillColor('#000000');
+
+        let itemX = left + 2;
+        doc.text(String(it.codigo || '').substring(0, 10), itemX, pageY + 2, { width: colW.cod });
+        itemX += colW.cod;
+        doc.text(String(it.descricao || '').substring(0, 52), itemX, pageY + 2, { width: colW.desc, ellipsis: true });
+        itemX += colW.desc;
+        doc.text(it.ncm || '', itemX, pageY + 2, { width: colW.ncm });
+        itemX += colW.ncm;
+        doc.text(it.icms?.cst || (it as any).cst || '000', itemX, pageY + 2, { width: colW.cst });
+        itemX += colW.cst;
+        doc.text(it.cfop || '', itemX, pageY + 2, { width: colW.cfop });
+        itemX += colW.cfop;
+        doc.text(it.unidade || 'UN', itemX, pageY + 2, { width: colW.un });
+        itemX += colW.un;
+        doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, pageY + 2, { width: colW.qtd, align: 'right' });
+        itemX += colW.qtd;
+        doc.text(formatCurrency(it.valorUnitario), itemX, pageY + 2, { width: colW.vunit, align: 'right' });
+        itemX += colW.vunit;
+        doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, pageY + 2, { width: colW.vtotal, align: 'right' });
+        itemX += colW.vtotal;
+        doc.font('Helvetica').text(formatCurrency(it.icms?.baseCalculo), itemX, pageY + 2, { width: colW.bcicms, align: 'right' });
+        itemX += colW.bcicms;
+        doc.text(formatCurrency(it.icms?.valor), itemX, pageY + 2, { width: colW.vicms, align: 'right' });
+        itemX += colW.vicms;
+        doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, pageY + 2, { width: colW.aliq, align: 'right' });
+
+        pageY += itemHeight;
+      }
+
+      if (pageNum === totalPages) {
+        renderAdditionalData(pageY);
+      }
     }
 
     doc.end();
