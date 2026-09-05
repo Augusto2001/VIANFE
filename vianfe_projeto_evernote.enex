@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">
+<en-export export-date="20260817T222130Z" application="ViaNfe Generator" version="1.0">
+  <note>
+    <title>📌 DOCUMENTAÇÃO COMPLETA DE PROJETO — VIANFE POR VIACONT</title>
+    <content>
+      <![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/en-note.dtd">
+      <en-note style="font-family: Arial, sans-serif; color: #1e293b;">
+        <h1 style="color: #428556; border-bottom: 2px solid #10b981; padding-bottom: 8px;">ViaNfe por Viacont — Documentação Oficial do Projeto</h1>
+        <p><strong>Data de Registro:</strong> 17 de Agosto de 2026</p>
+        <p><strong>Empresa:</strong> Viacont Inovações Contábeis</p>
+        <p><strong>Plataforma:</strong> Inteligência Fiscal, Automação SEFAZ DFe, Gestão Multi-Empresa e BPO Financeiro</p>
+
+        <hr/>
+
+        <h2 style="color: #06b6d4;">🎨 1. Marca &amp; Identidade Visual</h2>
+        <ul>
+          <li><strong>Nome da Marca:</strong> ViaNfe por Viacont</li>
+          <li><strong>Verde Esmeralda Corporativo:</strong> #428556</li>
+          <li><strong>Menta Neon:</strong> #10b981</li>
+          <li><strong>Ciano Cyber:</strong> #06b6d4</li>
+          <li><strong>Fundo Obsidiana Dark:</strong> #090d16</li>
+        </ul>
+
+        <h2 style="color: #06b6d4;">⚡ 2. Funcionalidades Concluídas &amp; Testadas</h2>
+        <ul>
+          <li><strong>Captura SEFAZ DFe:</strong> Loop automático de NSUs (últimos 90 dias) sem travar nos limites da SEFAZ.</li>
+          <li><strong>Certificados A1 Legados:</strong> Leitor <code>pfxLoader.ts</code> via node-forge para certs Serpro, Soluti e Certisign.</li>
+          <li><strong>Organização no Google Drive G:\:</strong> Estrutura nativa em <code>G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS\[CLIENTE]\SETOR FISCAL\NFe\[ANO]\[MÊS]\Entradas\</code> e <code>Saidas\</code> com XMLs e PDFs.</li>
+          <li><strong>Manifestação do Destinatário:</strong> Ciência (210210), Confirmação (210200), Desconhecimento (210220) e Recusa (210240).</li>
+          <li><strong>Multi-Tenant / Multi-Escritório:</strong> Tabela <code>tenants</code> (Escritórios Contábeis) + <code>users</code> com papéis <code>admin</code> vs <code>client</code> e matriz de permissão por empresa.</li>
+          <li><strong>ViaAnalytics:</strong> Radar de Omissão de Receita, Curva ABC 80/20, Lucro no Estoque, Estoque Descoberto e Convites por E-mail com Token de Senha.</li>
+          <li><strong>Blindagem de Segurança:</strong> Zero SourceMaps no Vite (F12 anti-inspeção), Anti-Brute Force e HTTP Security Headers.</li>
+        </ul>
+
+        <h2 style="color: #06b6d4;">📋 3. Ordem de Prioridades do Projeto</h2>
+        <ol>
+          <li>🛡️ <strong>Prioridade 1:</strong> Blindagem de Segurança (Ativa)</li>
+          <li>🚀 <strong>Prioridade 2:</strong> Deploy em Nuvem (Oracle Cloud / VPS 24/7 com SSL/HTTPS)</li>
+          <li>💰 <strong>Prioridade 3:</strong> Módulo Financeiro &amp; Conciliação OFX/PDF Estilo Conta Azul</li>
+          <li>🏛️ <strong>Prioridade 4:</strong> Exportação Contábil Domínio Sistemas (.TXT)</li>
+          <li>📊 <strong>Prioridade 5:</strong> Inteligência Contábil Estilo Nucont</li>
+          <li>📱 <strong>Prioridade 6:</strong> App Mobile PWA do Cliente (Fotos de Recibos/OCR)</li>
+        </ol>
+
+        <hr/>
+
+        <p style="font-size: 11px; color: #64748b;">Gerado automaticamente pelo assistente de IA da Viacont em 17/08/2026.</p>
+      </en-note>]]>
+    </content>
+    <created>20260817T222130Z</created>
+    <updated>20260817T222130Z</updated>
+    <tag>Viacont</tag>
+    <tag>ViaNfe</tag>
+    <tag>Projeto</tag>
+    <note-attributes>
+      <source>ViaNfe Assistant</source>
+    </note-attributes>
+  </note>
+</en-export>

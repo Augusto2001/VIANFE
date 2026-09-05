@@ -1,0 +1,32 @@
+=== LISTA DE ENDPOINTS DA API REST & WEBHOOKS VIANFE ===
+
+1. WEBHOOK WHATSAPP / N8N AUTOMATION (Emissão NFS-e Prefeituras):
+http://localhost:3001/api/portal/nfse/webhook-whatsapp
+(Nuvem: https://vianfe.viacont.com.br/api/portal/nfse/webhook-whatsapp)
+
+2. EMISSÃO NFS-E PREFEITURAS (Salvador, Feira, Lauro, S. Gonçalo, Curitiba, ADN):
+http://localhost:3001/api/portal/nfse/emit
+
+3. LISTA DE NFS-E EMITIDAS POR EMPRESA:
+http://localhost:3001/api/portal/nfse?company_id=ID_DA_EMPRESA
+
+4. MANIFESTAÇÃO DO DESTINATÁRIO SEFAZ (Ciência, Confirmação, Desconhecimento, Recusa):
+http://localhost:3001/api/portal/manifest
+
+5. LOGIN E AUTENTICAÇÃO JWT:
+http://localhost:3001/api/auth/login
+
+6. GESTÃO DE USUÁRIOS E PERMISSÕES DE CLIENTES:
+http://localhost:3001/api/users
+
+7. SINCRONIZAÇÃO SEFAZ DFE EM LOOP POR EMPRESA:
+http://localhost:3001/api/companies/ID_DA_EMPRESA/sync-sefaz
+
+8. LISTA DE EMPRESAS CLIENTES:
+http://localhost:3001/api/companies
+
+9. LISTA DE NOTAS FISCAIS COM FILTROS:
+http://localhost:3001/api/invoices
+
+10. VERIFICAÇÃO DE SAÚDE DO SERVIDOR (HEALTH CHECK):
+http://localhost:3001/health

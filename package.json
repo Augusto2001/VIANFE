@@ -8,7 +8,9 @@
     "dev:server": "npm.cmd run --prefix server dev",
     "dev:client": "npm.cmd run --prefix client dev",
     "build": "npm.cmd run --prefix server build && npm.cmd run --prefix client build",
-    "start": "npm.cmd run --prefix server start"
+    "start": "npm.cmd run --prefix server start",
+    "backup": "powershell -ExecutionPolicy Bypass -File ./save_daily_backup.ps1",
+    "test:e2e": "node tests/e2e/test_runner.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

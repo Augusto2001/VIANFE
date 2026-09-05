@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Company, Invoice, InvoiceSummary } from '../types';
 import { api } from '../services/api';
+import { LiveEngineStream } from './LiveEngineStream';
+import { ManifestationModal } from './ManifestationModal';
 import { 
   Search, 
   Calendar, 
@@ -16,15 +18,16 @@ import {
   Building2, 
   CheckSquare, 
   Square, 
-  FileArchive, 
   AlertCircle,
   TrendingUp,
-  Sparkles,
   ChevronLeft,
   ChevronRight,
-  UploadCloud
+  UploadCloud,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  Clock
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface DashboardProps {
   selectedCompany: Company | null;
@@ -40,7 +43,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSelectInvoice,
 }) => {
   // Filters State
-  const [period, setPeriod] = useState<'7d' | '15d' | '30d' | 'custom'>('30d');
+  const [period, setPeriod] = useState<'7d' | '15d' | '30d' | 'all' | 'custom'>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [tipo, setTipo] = useState<'all' | 'entrada' | 'saida'>('all');
@@ -65,6 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [syncingInvoiceId, setSyncingInvoiceId] = useState<string | null>(null);
+  const [manifestingInvoice, setManifestingInvoice] = useState<Invoice | null>(null);
 
   // Fetch Invoices exclusively for selected company
   const loadInvoices = useCallback(async () => {
@@ -78,18 +82,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setLoading(true);
       const res = await api.getInvoices({
         company_id: selectedCompany.id,
-        period,
+        period: period,
         startDate: period === 'custom' ? startDate : undefined,
         endDate: period === 'custom' ? endDate : undefined,
-        tipo,
-        status,
-        search,
+        tipo: tipo === 'all' ? undefined : tipo,
+        status: status === 'all' ? undefined : status,
+        search: search || undefined,
         page,
-        limit: 25,
+        limit: 50,
       });
-
       setInvoices(res.invoices);
-      setSummary(res.summary);
+      if (res.summary) setSummary(res.summary);
       setTotalPages(res.totalPages || 1);
     } catch (err) {
       console.error('Error fetching company invoices:', err);
@@ -129,7 +132,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (!selectedCompany) return;
     try {
       setBatchLoading(true);
-      const blob = await api.downloadZip(selectedCompany.id, type, selectedIds.length > 0 ? selectedIds : undefined);
+      const blob = await api.downloadZip(
+        selectedCompany.id, 
+        type, 
+        selectedIds.length > 0 ? selectedIds : undefined,
+        {
+          period,
+          startDate: period === 'custom' ? startDate : undefined,
+          endDate: period === 'custom' ? endDate : undefined,
+          tipo: tipo === 'all' ? undefined : tipo,
+          status: status === 'all' ? undefined : status,
+          search: search || undefined,
+        }
+      );
       
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -146,13 +161,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Sync individual invoice to Drive
-  const handleSyncDrive = async (invoiceId: string) => {
+  // Export CSV
+  const handleExportCsv = () => {
+    if (!invoices.length || !selectedCompany) return;
+    
+    const headers = ['Chave de Acesso', 'Número', 'Série', 'Tipo', 'Data Emissão', 'CNPJ Emitente', 'Razão Social Emitente', 'Valor Total (R$)', 'Status', 'Sincronizado Drive'];
+    const rows = invoices.map(i => [
+      `"${i.chave_acesso}"`,
+      `"${i.numero}"`,
+      `"${i.serie}"`,
+      `"${i.tipo.toUpperCase()}"`,
+      `"${i.data_emissao}"`,
+      `"${i.emitente_cnpj}"`,
+      `"${i.emitente_nome.replace(/"/g, '""')}"`,
+      i.valor_total.toFixed(2),
+      `"${i.status.toUpperCase()}"`,
+      i.gdrive_synced ? 'SIM' : 'NÃO'
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Relatorio_Fiscal_${selectedCompany.razao_social.substring(0, 20)}_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSyncSingleInvoice = async (invoiceId: string) => {
     try {
       setSyncingInvoiceId(invoiceId);
       await api.syncInvoiceToDrive(invoiceId);
-      confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
-      await loadInvoices();
+      loadInvoices();
     } catch (err: any) {
       alert(`Erro ao sincronizar com Google Drive: ${err.message}`);
     } finally {
@@ -161,7 +204,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const formatCurrency = (val?: number) => {
-    return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (val === undefined || val === null) return 'R$ 0,00';
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
   const formatCnpj = (cnpj: string) => {
@@ -173,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return 'N/A';
+    if (!dateStr) return '—';
     try {
       const d = new Date(dateStr);
       return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -185,183 +229,122 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Guard: No company selected
   if (!selectedCompany) {
     return (
-      <div className="max-w-7xl mx-auto px-4 py-16 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-brand-500/10 text-brand-400 flex items-center justify-center mx-auto mb-4 border border-brand-500/20 shadow-xl">
-          <Building2 className="w-8 h-8" />
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
+          <Building2 className="w-7 h-7" />
         </div>
-        <h2 className="text-xl font-bold text-white">Nenhuma Empresa Cliente Selecionada</h2>
-        <p className="text-sm text-slate-400 max-w-md mx-auto mt-2">
-          Cadastre as empresas clientes do escritório para iniciar a gestão, downloads de XML/PDF e sincronização com o Google Drive.
+        <h2 className="text-lg font-bold text-white">Nenhuma Empresa Cliente Selecionada</h2>
+        <p className="text-xs text-slate-400 max-w-md mx-auto mt-2">
+          Selecione uma empresa no cabeçalho ou cadastre uma nova empresa cliente para iniciar o monitoramento fiscal.
         </p>
         <button
           onClick={onOpenNewCompanyModal}
-          className="mt-6 px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-xl transition-all shadow-lg shadow-brand-500/20 inline-flex items-center gap-2"
+          className="mt-5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-all inline-flex items-center gap-2"
         >
           <Building2 className="w-4 h-4" />
-          Cadastrar Primeira Empresa
+          Cadastrar Empresa
         </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       
-      {/* Top Banner: Selected Client Info & Sefaz Status */}
-      <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-700 to-sky-500 flex items-center justify-center text-white font-bold shadow-md shadow-brand-500/20 text-lg shrink-0">
-            {selectedCompany.razao_social.substring(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-white tracking-tight">
-                {selectedCompany.razao_social}
-              </h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Isolamento Seguro
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono">
-              <span>CNPJ: <strong className="text-slate-200">{formatCnpj(selectedCompany.cnpj)}</strong></span>
-              <span>•</span>
-              <span>UF: <strong className="text-slate-200">{selectedCompany.uf}</strong></span>
-              <span>•</span>
-              <span>Pasta Drive: <strong className="text-brand-400">{selectedCompany.gdrive_folder_name || 'Padrão'}</strong></span>
-            </div>
-          </div>
-        </div>
+      {/* 1. Sleek 1-Line Status Strip (No visual clutter) */}
+      <LiveEngineStream />
 
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-          <button
-            onClick={onOpenImporter}
-            className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
-          >
-            <UploadCloud className="w-4 h-4 text-brand-400" />
-            <span>Importar XMLs / Lote</span>
-          </button>
-
-          <button
-            onClick={loadInvoices}
-            disabled={loading}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl border border-slate-700 transition-colors"
-            title="Atualizar lista de notas"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-brand-400' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* KPI Cards: Strictly for Selected Company */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 2. Top KPI Summary Cards (Clean Inter typography & balanced contrast) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         
-        {/* Total Notas */}
-        <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-1">
+        {/* Total Volume */}
+        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Total de Notas no Período</span>
-            <span className="p-1 rounded bg-brand-500/10 text-brand-400">
+            <span>Total de Notas</span>
+            <span className="p-1 rounded bg-slate-800 text-slate-300">
               <FileText className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="text-2xl font-black text-white font-mono">
+          <div className="text-2xl font-bold text-white">
             {summary.totalCount}
           </div>
-          <div className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
-            <span>Volume:</span>
-            <strong className="text-emerald-400">{formatCurrency(summary.totalValor)}</strong>
+          <div className="text-[11px] text-slate-400">
+            Volume total: <span className="font-semibold text-slate-200">{formatCurrency(summary.totalValor)}</span>
           </div>
         </div>
 
         {/* Entradas */}
-        <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-1">
+        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
             <span>Notas Recebidas (Entradas)</span>
-            <span className="p-1 rounded bg-emerald-500/10 text-emerald-400">
+            <span className="p-1 rounded bg-blue-500/10 text-blue-300">
               <ArrowDownLeft className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="text-2xl font-black text-emerald-400 font-mono">
+          <div className="text-2xl font-bold text-slate-100">
             {formatCurrency(summary.valorEntradas)}
           </div>
           <p className="text-[11px] text-slate-400">Compras e insumos de fornecedores</p>
         </div>
 
         {/* Saídas */}
-        <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-1">
+        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
             <span>Notas Emitidas (Saídas)</span>
-            <span className="p-1 rounded bg-sky-500/10 text-sky-400">
+            <span className="p-1 rounded bg-amber-500/10 text-amber-300">
               <ArrowUpRight className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="text-2xl font-black text-sky-400 font-mono">
+          <div className="text-2xl font-bold text-slate-100">
             {formatCurrency(summary.valorSaidas)}
           </div>
-          <p className="text-[11px] text-slate-400">Faturamento e vendas do cliente</p>
+          <p className="text-[11px] text-slate-400">Faturamento e vendas da empresa</p>
         </div>
 
         {/* Google Drive Status */}
-        <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-1">
+        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Sincronização Google Drive</span>
-            <span className="p-1 rounded bg-brand-500/10 text-brand-400">
+            <span>Backup Google Drive</span>
+            <span className="p-1 rounded bg-slate-800 text-slate-300">
               <HardDrive className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="text-2xl font-black text-white font-mono flex items-baseline gap-1.5">
+          <div className="text-2xl font-bold text-white flex items-baseline gap-1.5">
             <span className="text-emerald-400">{summary.totalGdriveSynced}</span>
             <span className="text-xs text-slate-400 font-normal">/ {summary.totalCount} sincronizadas</span>
           </div>
-          <div className="text-[11px] text-amber-400 font-mono font-medium">
-            {summary.totalGdrivePending} pendente(s) de backup
+          <div className="text-[11px] text-slate-400 font-medium">
+            {summary.totalGdrivePending > 0 ? (
+              <span className="text-amber-400">{summary.totalGdrivePending} pendente(s)</span>
+            ) : (
+              <span className="text-emerald-400">Tudo em dia</span>
+            )}
           </div>
         </div>
 
       </div>
 
-      {/* Filter Control Bar: Period (7, 15, 30 days & Custom), Search, Type */}
-      <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-3">
-        
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* 3. Filter Bar (Period, Type, Search, Status) */}
+      <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           
           {/* Period Selector Buttons */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-950/80 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setPeriod('7d')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                period === '7d' 
-                  ? 'bg-brand-600 text-white shadow-md' 
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Últimos 7 dias
-            </button>
-            <button
-              onClick={() => setPeriod('15d')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                period === '15d' 
-                  ? 'bg-brand-600 text-white shadow-md' 
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Últimos 15 dias
-            </button>
-            <button
-              onClick={() => setPeriod('30d')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                period === '30d' 
-                  ? 'bg-brand-600 text-white shadow-md' 
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Últimos 30 dias
-            </button>
+          <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800">
+            {(['all', '7d', '15d', '30d'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                  period === p ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {p === 'all' ? 'Todos' : p === '7d' ? '7 dias' : p === '15d' ? '15 dias' : '30 dias'}
+              </button>
+            ))}
             <button
               onClick={() => setPeriod('custom')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                period === 'custom' 
-                  ? 'bg-brand-600 text-white shadow-md' 
-                  : 'text-slate-400 hover:text-slate-200'
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                period === 'custom' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
@@ -369,178 +352,228 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </button>
           </div>
 
-          {/* Type Filter Tabs (Entrada / Saida / Todas) */}
-          <div className="flex items-center gap-1 p-1 bg-slate-950/80 rounded-xl border border-slate-800 text-xs font-semibold">
+          {/* Type Filter (Entrada / Saída / Todas) */}
+          <div className="flex items-center gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
             <button
               onClick={() => setTipo('all')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                tipo === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`px-3 py-1 rounded-md transition-colors ${
+                tipo === 'all' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Todas
             </button>
             <button
               onClick={() => setTipo('entrada')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                tipo === 'entrada' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`px-3 py-1 rounded-md transition-colors ${
+                tipo === 'entrada' ? 'bg-blue-500/20 text-blue-300 font-semibold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Entradas
             </button>
             <button
               onClick={() => setTipo('saida')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
-                tipo === 'saida' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`px-3 py-1 rounded-md transition-colors ${
+                tipo === 'saida' ? 'bg-amber-500/20 text-amber-300 font-semibold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Saídas
             </button>
           </div>
 
-        </div>
-
-        {/* Secondary Row: Custom Date Inputs & Search */}
-        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-800/80">
-          
-          {/* Custom Date Pickers */}
-          {period === 'custom' && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400 font-medium">De:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:border-brand-500"
-              />
-              <span className="text-slate-400 font-medium">Até:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:border-brand-500"
-              />
-            </div>
-          )}
-
           {/* Search Input */}
-          <div className="relative flex-1 min-w-[240px]">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar por Chave de Acesso (44 dígitos), Fornecedor, Cliente ou Nº da Nota..."
+              placeholder="Buscar por número, emitente..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:border-brand-500"
+              className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-slate-600"
             />
           </div>
 
-          {/* Status Dropdown */}
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as any)}
-            className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-brand-500 font-medium"
-          >
-            <option value="all">Todos os Status</option>
-            <option value="autorizada">Autorizadas</option>
-            <option value="cancelada">Canceladas</option>
-          </select>
-
         </div>
 
+        {/* Custom Date Range Drawer */}
+        {period === 'custom' && (
+          <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 animate-fade-in bg-slate-950/60 p-3 rounded-lg">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-300">Data Inicial:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-300">Data Final:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 mr-1">Atalhos:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                  setStartDate(firstDay.toISOString().split('T')[0]);
+                  setEndDate(now.toISOString().split('T')[0]);
+                }}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-medium transition-colors"
+              >
+                Mês Atual
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                  const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+                  setStartDate(firstDay.toISOString().split('T')[0]);
+                  setEndDate(lastDay.toISOString().split('T')[0]);
+                }}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-medium transition-colors"
+              >
+                Mês Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const d = new Date();
+                  d.setDate(d.getDate() - 90);
+                  setStartDate(d.toISOString().split('T')[0]);
+                  setEndDate(now.toISOString().split('T')[0]);
+                }}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-medium transition-colors"
+              >
+                Últimos 90 dias
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate('2026-01-01');
+                  setEndDate('2026-12-31');
+                }}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-medium transition-colors"
+              >
+                Ano 2026
+              </button>
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                  }}
+                  className="px-2 py-1 text-rose-400 hover:text-rose-300 text-[11px] font-medium transition-colors ml-1"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Batch Action Bar (Visible when notes are selected or available) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={toggleSelectAll}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-medium"
-          >
-            {selectedIds.length > 0 && selectedIds.length === invoices.length ? (
-              <CheckSquare className="w-4 h-4 text-brand-400" />
-            ) : (
-              <Square className="w-4 h-4" />
-            )}
-            <span>
-              {selectedIds.length === 0 ? 'Selecionar Todas' : `${selectedIds.length} nota(s) selecionada(s)`}
-            </span>
-          </button>
-        </div>
+      {/* 4. Batch Actions Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <button
+          onClick={toggleSelectAll}
+          className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors font-medium min-h-[44px]"
+        >
+          {selectedIds.length > 0 && selectedIds.length === invoices.length ? (
+            <CheckSquare className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <Square className="w-4 h-4" />
+          )}
+          <span>
+            {selectedIds.length === 0 ? 'Selecionar Todas' : `${selectedIds.length} selecionada(s)`}
+          </span>
+        </button>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => handleDownloadZip('xml')}
             disabled={batchLoading || invoices.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors disabled:opacity-40 shadow-sm"
-            title="Baixar arquivo compactado ZIP contendo todos os XMLs filtrados"
+            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-medium border border-slate-800 transition-colors disabled:opacity-40"
           >
-            <FileCode className="w-4 h-4 text-brand-400" />
-            <span>Baixar Lote XML (.ZIP)</span>
+            <FileCode className="w-4 h-4 text-slate-400" />
+            <span>Baixar XMLs (.ZIP)</span>
           </button>
 
           <button
             onClick={() => handleDownloadZip('pdf')}
             disabled={batchLoading || invoices.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors disabled:opacity-40 shadow-sm"
-            title="Baixar arquivo compactado ZIP contendo todos os DANFEs PDF"
+            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-medium border border-slate-800 transition-colors disabled:opacity-40"
           >
-            <FileText className="w-4 h-4 text-emerald-400" />
-            <span>Baixar Lote PDF (.ZIP)</span>
+            <FileText className="w-4 h-4 text-slate-400" />
+            <span>Baixar PDFs (.ZIP)</span>
+          </button>
+
+          <button
+            onClick={handleExportCsv}
+            disabled={invoices.length === 0}
+            className="min-h-[44px] flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-medium border border-slate-800 transition-colors disabled:opacity-40"
+          >
+            <Download className="w-4 h-4 text-slate-400" />
+            <span>Exportar CSV</span>
           </button>
         </div>
       </div>
 
-      {/* Invoices Table: Strict Isolation and Real Data Only */}
-      <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+      {/* 5. Invoices Table: Clean, no redundant Destinatário column, proper spacing */}
+      <div className="rounded-xl border border-slate-800 overflow-hidden bg-slate-950/60 shadow-lg">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950/80 text-slate-300 font-semibold border-b border-slate-800">
+            <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-800">
               <tr>
-                <th className="py-3 px-3.5 w-10 text-center">
+                <th className="py-3 px-3 w-10 text-center">
                   <span className="sr-only">Seleção</span>
                 </th>
-                <th className="py-3 px-3">Data Emissão</th>
-                <th className="py-3 px-3">Nº / Série</th>
-                <th className="py-3 px-3">Tipo</th>
-                <th className="py-3 px-3">Emitente / Fornecedor</th>
-                <th className="py-3 px-3">Destinatário</th>
-                <th className="py-3 px-3 text-right">Valor Total</th>
-                <th className="py-3 px-3 text-center">Status</th>
-                <th className="py-3 px-3 text-center">Google Drive</th>
+                <th className="py-3 px-3 whitespace-nowrap">Data</th>
+                <th className="py-3 px-3 whitespace-nowrap">Nº / Série</th>
+                <th className="py-3 px-3 whitespace-nowrap">Tipo</th>
+                <th className="py-3 px-4 min-w-[240px]">Emitente / Fornecedor</th>
+                <th className="py-3 px-4 text-right whitespace-nowrap">Valor Total</th>
+                <th className="py-3 px-3 text-center whitespace-nowrap">Status</th>
+                <th className="py-3 px-3 text-center whitespace-nowrap">Drive</th>
                 <th className="py-3 px-3.5 text-center w-48">Ações</th>
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-slate-800/80">
+            <tbody className="divide-y divide-slate-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="py-16 text-center text-slate-400">
-                    <RefreshCw className="w-6 h-6 animate-spin mx-auto text-brand-400 mb-2" />
-                    <span>Carregando notas fiscais da empresa...</span>
+                  <td colSpan={9} className="py-16 text-center text-slate-400">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto text-slate-400 mb-2" />
+                    <span>Carregando notas fiscais...</span>
                   </td>
                 </tr>
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <div className="max-w-sm mx-auto space-y-3">
-                      <div className="w-12 h-12 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                      <div className="w-12 h-12 rounded-xl bg-slate-900 text-slate-400 flex items-center justify-center mx-auto border border-slate-800">
                         <AlertCircle className="w-6 h-6" />
                       </div>
                       <h4 className="font-semibold text-white text-sm">
-                        Nenhuma nota fiscal encontrada no período
+                        Nenhuma nota fiscal encontrada
                       </h4>
                       <p className="text-xs text-slate-400">
-                        Não existem notas fiscais registradas para <strong>{selectedCompany.razao_social}</strong> no período selecionado.
+                        Não existem notas registradas para o filtro selecionado.
                       </p>
-                      <div className="pt-2">
-                        <button
-                          onClick={onOpenImporter}
-                          className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-md inline-flex items-center gap-1.5"
-                        >
-                          <UploadCloud className="w-3.5 h-3.5" />
-                          Importar XMLs Desta Empresa
-                        </button>
-                      </div>
                     </div>
                   </td>
                 </tr>
@@ -552,41 +585,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   return (
                     <tr
                       key={inv.id}
-                      className={`hover:bg-slate-800/50 transition-colors ${
-                        isSelected ? 'bg-brand-500/10' : ''
+                      className={`hover:bg-slate-900/50 transition-colors ${
+                        isSelected ? 'bg-slate-900/90' : ''
                       }`}
                     >
                       {/* Checkbox */}
-                      <td className="py-3 px-3.5 text-center">
+                      <td className="py-3 px-3 text-center">
                         <button
                           onClick={() => toggleSelect(inv.id)}
-                          className="text-slate-400 hover:text-white"
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-500 hover:text-slate-300"
                         >
                           {isSelected ? (
-                            <CheckSquare className="w-4 h-4 text-brand-400" />
+                            <CheckSquare className="w-4 h-4 text-emerald-400" />
                           ) : (
                             <Square className="w-4 h-4" />
                           )}
                         </button>
                       </td>
 
-                      {/* Data Emissao */}
-                      <td className="py-3 px-3 whitespace-nowrap text-slate-300 font-mono text-[11px]">
+                      {/* Data Emissão */}
+                      <td className="py-3 px-3 whitespace-nowrap text-slate-300 text-xs">
                         {formatDate(inv.data_emissao)}
                       </td>
 
                       {/* Numero & Serie */}
-                      <td className="py-3 px-3 whitespace-nowrap font-mono">
-                        <span className="font-bold text-white">{inv.numero}</span>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="font-semibold text-white">{inv.numero}</span>
                         <span className="text-slate-400 text-[11px] ml-1.5">S:{inv.serie}</span>
                       </td>
 
-                      {/* Tipo: Entrada / Saida */}
+                      {/* Tipo: Soft Blue for Entrada, Soft Amber for Saída */}
                       <td className="py-3 px-3 whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                           inv.tipo === 'entrada'
-                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                            ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
+                            : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
                         }`}>
                           {inv.tipo === 'entrada' ? (
                             <>
@@ -602,28 +635,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </span>
                       </td>
 
-                      {/* Emitente */}
-                      <td className="py-3 px-3 max-w-[200px]">
-                        <div className="font-medium text-white truncate" title={inv.emitente_nome}>
+                      {/* Emitente (Expanded with full name and clean font) */}
+                      <td className="py-3 px-4">
+                        <div className="font-medium text-slate-100 line-clamp-1" title={inv.emitente_nome}>
                           {inv.emitente_nome}
                         </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                           {formatCnpj(inv.emitente_cnpj)}
                         </div>
                       </td>
 
-                      {/* Destinatario */}
-                      <td className="py-3 px-3 max-w-[200px]">
-                        <div className="font-medium text-slate-300 truncate" title={inv.destinatario_nome}>
-                          {inv.destinatario_nome}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          {formatCnpj(inv.destinatario_cnpj)}
-                        </div>
-                      </td>
-
-                      {/* Valor Total */}
-                      <td className="py-3 px-3 text-right font-mono font-bold text-emerald-400 whitespace-nowrap">
+                      {/* Valor Total (Right-aligned, clean font) */}
+                      <td className="py-3 px-4 text-right font-semibold text-slate-100 whitespace-nowrap text-xs">
                         {formatCurrency(inv.valor_total)}
                       </td>
 
@@ -631,70 +654,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                           inv.status === 'autorizada'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-rose-500/20 text-rose-300'
+                            ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
                         }`}>
                           {inv.status}
                         </span>
                       </td>
 
-                      {/* Google Drive Status */}
+                      {/* Google Drive */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         {inv.gdrive_synced ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-semibold" title="Arquivo enviado para pasta do cliente no Google Drive">
-                            <HardDrive className="w-3.5 h-3.5" />
-                            Sincronizado
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400" title="Sincronizada no Google Drive">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>OK</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 font-semibold" title="Ainda não sincronizado no Drive">
-                            <HardDrive className="w-3.5 h-3.5 text-amber-400/60" />
-                            Pendente
-                          </span>
+                          <button
+                            onClick={() => handleSyncSingleInvoice(inv.id)}
+                            disabled={isSyncingThis}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-medium border border-slate-800 transition-colors"
+                            title="Sincronizar agora com Google Drive"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isSyncingThis ? 'animate-spin text-emerald-400' : ''}`} />
+                            <span>Sincronizar</span>
+                          </button>
                         )}
                       </td>
 
-                      {/* Action Buttons per Row (XML, PDF, Drive, Detalhes) */}
+                      {/* Actions: View, PDF, XML, Manifest */}
                       <td className="py-3 px-3.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           
-                          {/* XML Download */}
-                          <a
-                            href={api.getXmlDownloadUrl(inv.id)}
-                            download={`${inv.chave_acesso}.xml`}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-300 hover:text-white transition-colors border border-slate-700/80"
-                            title="Baixar arquivo XML original"
+                          {/* View Detail Modal */}
+                          <button
+                            onClick={() => onSelectInvoice(inv)}
+                            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors"
+                            title="Ver detalhes completos da nota"
                           >
-                            <FileCode className="w-3.5 h-3.5" />
-                          </a>
+                            <Eye className="w-4 h-4" />
+                          </button>
 
-                          {/* PDF (DANFE) Download */}
+                          {/* PDF / DANFE */}
                           <a
                             href={api.getPdfDownloadUrl(inv.id)}
                             target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white transition-colors border border-slate-700/80"
-                            title="Baixar ou Visualizar DANFE oficial em PDF"
+                            rel="noopener noreferrer"
+                            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors"
+                            title="Abrir DANFE em PDF"
                           >
-                            <FileText className="w-3.5 h-3.5" />
+                            <FileText className="w-4 h-4" />
                           </a>
 
-                          {/* Drive Sync */}
-                          <button
-                            onClick={() => handleSyncDrive(inv.id)}
-                            disabled={isSyncingThis}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors border border-slate-700/80 disabled:opacity-50"
-                            title="Enviar para a pasta no Google Drive agora"
+                          {/* XML */}
+                          <a
+                            href={api.getXmlDownloadUrl(inv.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors"
+                            title="Baixar arquivo XML original"
                           >
-                            <HardDrive className={`w-3.5 h-3.5 ${isSyncingThis ? 'animate-spin text-sky-400' : ''}`} />
-                          </button>
+                            <FileCode className="w-4 h-4" />
+                          </a>
 
-                          {/* Detalhes Modal */}
+                          {/* Manifestação do Destinatário */}
                           <button
-                            onClick={() => onSelectInvoice(inv)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700/80"
-                            title="Ver detalhes completos da nota e tributos"
+                            onClick={() => setManifestingInvoice(inv)}
+                            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 border border-slate-800 transition-colors"
+                            title="Manifestação do Destinatário SEFAZ"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <ShieldCheck className="w-4 h-4" />
                           </button>
 
                         </div>
@@ -708,31 +736,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </table>
         </div>
 
-        {/* Pagination Bar */}
+        {/* Pagination */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs">
-            <span className="text-slate-400">
-              Página <strong className="text-white">{page}</strong> de <strong className="text-white">{totalPages}</strong>
-            </span>
-            <div className="flex items-center gap-1.5">
+          <div className="px-4 py-3 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <span>Página {page} de {totalPages}</span>
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page <= 1}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40"
+                onClick={() => setPage(prev => Math.max(prev - 1, 1))}
+                disabled={page === 1}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 disabled:opacity-30 border border-slate-800"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40"
+                onClick={() => setPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={page === totalPages}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 disabled:opacity-30 border border-slate-800"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
+
       </div>
+
+      {/* Manifestation Modal */}
+      {manifestingInvoice && (
+        <ManifestationModal
+          invoice={manifestingInvoice}
+          company={selectedCompany}
+          onClose={() => setManifestingInvoice(null)}
+          onSuccess={() => {
+            setManifestingInvoice(null);
+            loadInvoices();
+          }}
+        />
+      )}
 
     </div>
   );

@@ -1400,7 +1400,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                 <input
                   type="text"
                   readOnly
-                  value={openFinanceInfo?.webhookUrl || `https://vianfe.viacont.com/api/bpo/open-finance/webhook/${company.id}`}
+                  value={openFinanceInfo?.webhookUrl || `${window.location.origin}/api/bpo/open-finance/webhook/${company.id}`}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-emerald-300 text-xs font-mono select-all focus:outline-none"
                 />
                 <button

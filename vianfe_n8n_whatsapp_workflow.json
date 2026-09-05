@@ -1,0 +1,114 @@
+{
+  "name": "ViaNfe — Emissão de NFS-e via WhatsApp (Prefeituras & ADN)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-nfse-trigger",
+        "options": {}
+      },
+      "name": "1. Receber Mensagem WhatsApp (Webhook / Evolution API)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3001/api/portal/nfse/webhook-whatsapp",
+        "options": {},
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $json.body.phone || $json.body.from }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.body.message || $json.body.text }}"
+            },
+            {
+              "name": "valor",
+              "value": "={{ $json.body.valor || 1500.00 }}"
+            },
+            {
+              "name": "servico",
+              "value": "={{ $json.body.servico || 'Serviço de Consultoria Contábil / Fiscal' }}"
+            },
+            {
+              "name": "prefeitura",
+              "value": "={{ $json.body.prefeitura || 'Salvador' }}"
+            },
+            {
+              "name": "tomador_cnpj",
+              "value": "={{ $json.body.tomador_cnpj || '00000000000000' }}"
+            },
+            {
+              "name": "tomador_nome",
+              "value": "={{ $json.body.tomador_nome || 'Cliente WhatsApp' }}"
+            }
+          ]
+        }
+      },
+      "name": "2. Transmitir Emissão para o ViaNfe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.z-api.io/instances/SUA_INSTANCIA/token/SEU_TOKEN/send-text",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $node[\"1. Receber Mensagem WhatsApp (Webhook / Evolution API)\"].json.body.phone }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.whatsappResponseText }}"
+            }
+          ]
+        }
+      },
+      "name": "3. Responder Confirmação & PDF no WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        750,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "1. Receber Mensagem WhatsApp (Webhook / Evolution API)": {
+      "main": [
+        [
+          {
+            "node": "2. Transmitir Emissão para o ViaNfe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Transmitir Emissão para o ViaNfe": {
+      "main": [
+        [
+          {
+            "node": "3. Responder Confirmação & PDF no WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

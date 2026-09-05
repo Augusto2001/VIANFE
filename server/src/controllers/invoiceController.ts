@@ -14,7 +14,7 @@ export const invoiceController = {
   async list(req: Request, res: Response) {
     try {
       const company_id = req.query.company_id ? String(req.query.company_id) : '';
-      const period = req.query.period ? String(req.query.period) : '30d';
+      const period = req.query.period ? String(req.query.period) : 'all';
       const startDate = req.query.startDate ? String(req.query.startDate) : '';
       const endDate = req.query.endDate ? String(req.query.endDate) : '';
       const tipo = req.query.tipo ? String(req.query.tipo) : 'all';
@@ -35,7 +35,11 @@ export const invoiceController = {
       let dateFilterEnd: string | null = null;
       const now = new Date();
 
-      if (period === '7d') {
+      if (period === 'all') {
+        // No date filter — show all invoices for the company
+        dateFilterStart = null;
+        dateFilterEnd = null;
+      } else if (period === '7d') {
         const d = new Date(now);
         d.setDate(d.getDate() - 7);
         dateFilterStart = d.toISOString().split('T')[0] + 'T00:00:00.000Z';
@@ -147,12 +151,20 @@ export const invoiceController = {
       }
 
       const itens = invoice.itens_json ? JSON.parse(invoice.itens_json) : [];
+      const duplicatas = invoice.duplicatas_json ? JSON.parse(invoice.duplicatas_json) : [];
+      const fatura = invoice.fatura_json ? JSON.parse(invoice.fatura_json) : null;
+      const pagamentos = invoice.pagamentos_json ? JSON.parse(invoice.pagamentos_json) : [];
+      const installments = db.prepare('SELECT * FROM invoice_installments WHERE invoice_id = ? ORDER BY numero_parcela ASC').all(id) as any[];
 
       return res.json({
         success: true,
         data: {
           ...invoice,
-          itens
+          itens,
+          duplicatas,
+          fatura,
+          pagamentos,
+          installments
         }
       });
     } catch (err: any) {
@@ -190,7 +202,7 @@ export const invoiceController = {
   },
 
   /**
-   * Download or Stream individual DANFE PDF
+   * Download or Stream individual DANFE PDF (Padrão Nacional SEFAZ)
    */
   async downloadPdf(req: Request, res: Response) {
     try {
@@ -201,28 +213,31 @@ export const invoiceController = {
         return res.status(404).json({ success: false, message: 'Nota Fiscal não encontrada.' });
       }
 
+      let xmlContent = invoice.xml_raw;
+      if (!xmlContent && invoice.xml_file_path && fs.existsSync(invoice.xml_file_path)) {
+        xmlContent = fs.readFileSync(invoice.xml_file_path, 'utf-8');
+      }
+
       let pdfPath = invoice.pdf_file_path;
 
-      // Check if PDF exists or generate on-the-fly from XML
+      // Always generate/refresh DANFE to official National Standard layout
+      if (xmlContent) {
+        try {
+          const parsed = parseFiscalXml(xmlContent);
+          pdfPath = path.join(PDFS_DIR, `DANFE_${invoice.chave_acesso}.pdf`);
+          await generateDanfePdf(parsed, pdfPath);
+          db.prepare('UPDATE invoices SET pdf_file_path = ? WHERE id = ?').run(pdfPath, invoice.id);
+        } catch (genErr) {
+          console.warn('Could not generate DANFE on the fly, falling back to existing PDF:', genErr);
+        }
+      }
+
       if (!pdfPath || !fs.existsSync(pdfPath)) {
-        let xmlContent = invoice.xml_raw;
-        if (!xmlContent && invoice.xml_file_path && fs.existsSync(invoice.xml_file_path)) {
-          xmlContent = fs.readFileSync(invoice.xml_file_path, 'utf-8');
-        }
-
-        if (!xmlContent) {
-          return res.status(404).json({ success: false, message: 'XML necessário para gerar o DANFE não foi encontrado.' });
-        }
-
-        const parsed = parseFiscalXml(xmlContent);
-        pdfPath = path.join(PDFS_DIR, `DANFE_${invoice.chave_acesso}.pdf`);
-        await generateDanfePdf(parsed, pdfPath);
-
-        db.prepare('UPDATE invoices SET pdf_file_path = ? WHERE id = ?').run(pdfPath, invoice.id);
+        return res.status(404).json({ success: false, message: 'Arquivo DANFE PDF não encontrado.' });
       }
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="DANFE_${invoice.chave_acesso}.pdf"`);
+      res.setHeader('Content-Disposition', `inline; filename="DANFE_${invoice.chave_acesso}.pdf"`);
       const fileStream = fs.createReadStream(pdfPath);
       return fileStream.pipe(res);
     } catch (err: any) {
@@ -252,13 +267,56 @@ export const invoiceController = {
       let invoices: any[] = [];
       if (Array.isArray(ids) && ids.length > 0) {
         const placeholders = ids.map(() => '?').join(',');
-        invoices = db.prepare(`SELECT * FROM invoices WHERE company_id = ? AND id IN (${placeholders})`).all(company_id, ...ids.map(String));
+        invoices = db.prepare(`SELECT * FROM invoices WHERE company_id = ? AND id IN (${placeholders}) ORDER BY data_emissao DESC`).all(company_id, ...ids.map(String));
       } else {
-        invoices = db.prepare('SELECT * FROM invoices WHERE company_id = ?').all(company_id);
+        const period = req.body.period ? String(req.body.period) : 'all';
+        const startDate = req.body.startDate ? String(req.body.startDate) : '';
+        const endDate = req.body.endDate ? String(req.body.endDate) : '';
+        const tipo = req.body.tipo ? String(req.body.tipo) : 'all';
+        const status = req.body.status ? String(req.body.status) : 'all';
+        const search = req.body.search ? String(req.body.search) : '';
+
+        let whereClause = 'WHERE company_id = ?';
+        const queryParams: any[] = [company_id];
+
+        if (period === 'custom' && startDate && endDate) {
+          whereClause += ' AND data_emissao >= ? AND data_emissao <= ?';
+          queryParams.push(`${startDate}T00:00:00`, `${endDate}T23:59:59`);
+        } else if (period === '7d') {
+          const d = new Date(); d.setDate(d.getDate() - 7);
+          whereClause += ' AND data_emissao >= ?';
+          queryParams.push(d.toISOString());
+        } else if (period === '15d') {
+          const d = new Date(); d.setDate(d.getDate() - 15);
+          whereClause += ' AND data_emissao >= ?';
+          queryParams.push(d.toISOString());
+        } else if (period === '30d') {
+          const d = new Date(); d.setDate(d.getDate() - 30);
+          whereClause += ' AND data_emissao >= ?';
+          queryParams.push(d.toISOString());
+        }
+
+        if (tipo !== 'all') {
+          whereClause += ' AND tipo = ?';
+          queryParams.push(tipo);
+        }
+
+        if (status !== 'all') {
+          whereClause += ' AND status = ?';
+          queryParams.push(status);
+        }
+
+        if (search) {
+          whereClause += ' AND (numero LIKE ? OR chave_acesso LIKE ? OR emitente_nome LIKE ? OR emitente_cnpj LIKE ?)';
+          const s = `%${search}%`;
+          queryParams.push(s, s, s, s);
+        }
+
+        invoices = db.prepare(`SELECT * FROM invoices ${whereClause} ORDER BY data_emissao DESC`).all(...queryParams);
       }
 
       if (invoices.length === 0) {
-        return res.status(400).json({ success: false, message: 'Nenhuma nota selecionada para download.' });
+        return res.status(400).json({ success: false, message: 'Nenhuma nota localizada no período/filtros selecionados para download.' });
       }
 
       const archive = archiver('zip', { zlib: { level: 9 } });

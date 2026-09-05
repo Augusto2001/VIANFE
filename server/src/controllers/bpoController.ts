@@ -866,7 +866,9 @@ export const bpoController = {
         return;
       }
 
-      const webhookUrl = `https://vianfe.viacont.com/api/bpo/open-finance/webhook/${company_id}`;
+      const host = req.get('host') || 'vianfe.contadordev.com.br';
+      const protocol = req.protocol === 'http' && !req.secure && host.includes('localhost') ? 'http' : 'https';
+      const webhookUrl = `${protocol}://${host}/api/bpo/open-finance/webhook/${company_id}`;
       const totalTransactions = db.prepare(`
         SELECT count(*) as count, max(created_at) as last_sync 
         FROM bank_transactions 

@@ -8,9 +8,57 @@
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: #0b1329;
+  background-color: #06110d;
   color: #f1f5f9;
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Light Theme Variables */
+html.light, body.light {
+  color-scheme: light;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light .bg-slate-900,
+body.light .bg-slate-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html.light .bg-slate-950,
+body.light .bg-slate-950 {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html.light .border-slate-800,
+body.light .border-slate-800 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .text-slate-400,
+body.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-300,
+body.light .text-slate-300 {
+  color: #475569 !important;
+}
+
+html.light .text-white,
+body.light .text-white {
+  color: #0f172a !important;
+}
+
+html.light .glass-panel,
+body.light .glass-panel {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
 }
 
 /* Custom Scrollbars */
@@ -32,12 +80,10 @@ body {
   background: #475569;
 }
 
-/* Glassmorphism Card Utilities */
+/* Solid Cards - Crisp & Zero bleed-through */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0f172a;
+  border: 1px solid #1e293b;
 }
 
 .glass-panel-hover {
@@ -45,20 +91,15 @@ body {
 }
 
 .glass-panel-hover:hover {
-  background: rgba(30, 41, 59, 0.85);
-  border-color: rgba(56, 189, 248, 0.3);
+  background: #1e293b;
+  border-color: #10b981;
 }
 
-/* Glow effects */
-.glow-subtle {
-  box-shadow: 0 0 25px -5px rgba(2, 132, 199, 0.15);
-}
-
-/* Tab indicator */
-.tab-active {
-  background: #0284c7;
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+/* Dropdown solid background */
+.dropdown-solid {
+  background-color: #0b132b !important;
+  border: 1px solid #334155 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.9), 0 8px 10px -6px rgba(0, 0, 0, 0.9) !important;
 }
 
 /* Table row animation */
@@ -74,22 +115,5 @@ body {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.25s ease-out forwards;
-}
-
-/* Pulsing badge */
-.badge-live {
-  position: relative;
-}
-.badge-live::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  width: 6px;
-  height: 6px;
-  transform: translateY(-50%);
-  background-color: #10b981;
-  border-radius: 9999px;
-  box-shadow: 0 0 8px #10b981;
+  animation: fadeIn 0.2s ease-out forwards;
 }

@@ -1,11 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { db, XMLS_DIR, PDFS_DIR } from '../database/db.js';
+import { db, XMLS_DIR, PDFS_DIR, STORAGE_DIR } from '../database/db.js';
 import { parseFiscalXml, ParsedFiscalInvoice } from './xmlParser.js';
 import { generateDanfePdf } from './danfeGenerator.js';
 import { googleDriveService } from './googleDriveService.js';
+import { sefazDfeClient } from './sefazDfeClient.js';
 import { cleanNumeric } from '../utils/crypto.js';
+import { getInvoiceStoragePaths } from '../utils/driveFolderMatcher.js';
 
 export class SefazService {
   /**
@@ -25,27 +27,55 @@ export class SefazService {
     const parsed = parseFiscalXml(xmlString);
     const companyCnpjClean = cleanNumeric(company.cnpj);
     const emitenteCnpjClean = cleanNumeric(parsed.emitente.cnpjCpf);
-    const destinatarioCnpjClean = cleanNumeric(parsed.destinatario.cnpjCpf);
+    let actualCompany = company;
+    let actualCompanyId = companyId;
 
-    // Determine type: 'saida' (emitted by client) vs 'entrada' (received by client)
-    let tipo: 'entrada' | 'saida' = 'entrada';
-    if (companyCnpjClean === emitenteCnpjClean) {
-      tipo = 'saida';
-    } else if (companyCnpjClean === destinatarioCnpjClean) {
-      tipo = 'entrada';
-    } else {
-      // Default to what the XML says or Entrada
-      tipo = parsed.tipoOperacao === '1' ? 'saida' : 'entrada';
+    // Fill destinatario if empty (e.g. resNFe / resCTe summary from SEFAZ DFe)
+    if (!parsed.destinatario.cnpjCpf || parsed.destinatario.cnpjCpf === '') {
+      parsed.destinatario.cnpjCpf = actualCompany.cnpj;
+      parsed.destinatario.razaoSocial = actualCompany.razao_social;
+      parsed.destinatario.uf = actualCompany.uf;
     }
 
-    // Save XML file to storage
-    const xmlFileName = `${parsed.chaveAcesso}.xml`;
-    const xmlFilePath = path.join(XMLS_DIR, xmlFileName);
+    const destinatarioCnpjClean = cleanNumeric(parsed.destinatario.cnpjCpf);
+    let tipo: 'entrada' | 'saida' = 'entrada';
+
+    if (companyCnpjClean === destinatarioCnpjClean) {
+      tipo = 'entrada';
+    } else if (companyCnpjClean === emitenteCnpjClean) {
+      tipo = 'saida';
+    } else {
+      // Check if another registered company matches the destinatário (compra) or emitente (venda)
+      const foundDest = destinatarioCnpjClean ? db.prepare('SELECT * FROM companies WHERE cnpj LIKE ?').get(`%${destinatarioCnpjClean}%`) as any : null;
+      const foundEmit = emitenteCnpjClean ? db.prepare('SELECT * FROM companies WHERE cnpj LIKE ?').get(`%${emitenteCnpjClean}%`) as any : null;
+
+      if (foundDest) {
+        actualCompany = foundDest;
+        actualCompanyId = foundDest.id;
+        tipo = 'entrada';
+      } else if (foundEmit) {
+        actualCompany = foundEmit;
+        actualCompanyId = foundEmit.id;
+        tipo = 'saida';
+      } else {
+        tipo = parsed.tipoOperacao === '1' ? 'saida' : 'entrada';
+      }
+    }
+
+    // Build file paths targeting G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS or local fallback
+    const { xmlFilePath, pdfFilePath } = getInvoiceStoragePaths(
+      actualCompany.razao_social,
+      parsed.dataEmissao,
+      parsed.chaveAcesso,
+      STORAGE_DIR,
+      actualCompany.cnpj,
+      tipo
+    );
+
+    // Save XML file
     fs.writeFileSync(xmlFilePath, xmlString, 'utf-8');
 
     // Generate DANFE PDF
-    const pdfFileName = `DANFE_${parsed.chaveAcesso}.pdf`;
-    const pdfFilePath = path.join(PDFS_DIR, pdfFileName);
     try {
       await generateDanfePdf(parsed, pdfFilePath);
     } catch (pdfErr: any) {
@@ -55,7 +85,18 @@ export class SefazService {
     const now = new Date().toISOString();
     const existing = db.prepare('SELECT id FROM invoices WHERE chave_acesso = ?').get(parsed.chaveAcesso) as any;
 
+    const faturaJson = parsed.fatura ? JSON.stringify(parsed.fatura) : null;
+    const duplicatasJson = parsed.duplicatas && parsed.duplicatas.length > 0 ? JSON.stringify(parsed.duplicatas) : null;
+    const pagamentosJson = parsed.pagamentos && parsed.pagamentos.length > 0 ? JSON.stringify(parsed.pagamentos) : null;
+    const transporteJson = parsed.transporte ? JSON.stringify(parsed.transporte) : null;
+    const infoAdicional = parsed.informacoesComplementares || null;
+
+    let targetInvoiceId = '';
+    let action: 'created' | 'updated' = 'created';
+
     if (existing) {
+      targetInvoiceId = existing.id;
+      action = 'updated';
       db.prepare(`
         UPDATE invoices SET
           company_id = ?,
@@ -80,12 +121,17 @@ export class SefazService {
           valor_cofins = ?,
           valor_ipi = ?,
           itens_json = ?,
+          fatura_json = ?,
+          duplicatas_json = ?,
+          pagamentos_json = ?,
+          transporte_json = ?,
+          info_adicional = ?,
           xml_raw = ?,
           xml_file_path = ?,
           pdf_file_path = ?
         WHERE id = ?
       `).run(
-        companyId,
+        actualCompanyId,
         parsed.numero,
         parsed.serie,
         parsed.modelo,
@@ -107,70 +153,142 @@ export class SefazService {
         parsed.totais.valorCofins,
         parsed.totais.valorIpi,
         JSON.stringify(parsed.itens),
+        faturaJson,
+        duplicatasJson,
+        pagamentosJson,
+        transporteJson,
+        infoAdicional,
         xmlString,
         xmlFilePath,
         pdfFilePath,
         existing.id
       );
-
-      return { invoiceId: existing.id, chaveAcesso: parsed.chaveAcesso, action: 'updated' };
+    } else {
+      targetInvoiceId = uuidv4();
+      action = 'created';
+      db.prepare(`
+        INSERT INTO invoices (
+          id, company_id, chave_acesso, numero, serie, modelo, tipo, status,
+          natureza_operacao, data_emissao, data_saida_entrada,
+          emitente_cnpj, emitente_nome, emitente_uf,
+          destinatario_cnpj, destinatario_nome, destinatario_uf,
+          valor_total, valor_produtos, valor_icms, valor_pis, valor_cofins, valor_ipi,
+          itens_json, fatura_json, duplicatas_json, pagamentos_json, transporte_json, info_adicional,
+          xml_raw, xml_file_path, pdf_file_path,
+          gdrive_synced, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?,
+          0, ?
+        )
+      `).run(
+        targetInvoiceId,
+        actualCompanyId,
+        parsed.chaveAcesso,
+        parsed.numero,
+        parsed.serie,
+        parsed.modelo,
+        tipo,
+        parsed.status,
+        parsed.naturezaOperacao,
+        parsed.dataEmissao,
+        parsed.dataSaidaEntrada || null,
+        parsed.emitente.cnpjCpf,
+        parsed.emitente.razaoSocial,
+        parsed.emitente.uf,
+        parsed.destinatario.cnpjCpf,
+        parsed.destinatario.razaoSocial,
+        parsed.destinatario.uf,
+        parsed.totais.valorTotal,
+        parsed.totais.valorProdutos,
+        parsed.totais.valorIcms,
+        parsed.totais.valorPis,
+        parsed.totais.valorCofins,
+        parsed.totais.valorIpi,
+        JSON.stringify(parsed.itens),
+        faturaJson,
+        duplicatasJson,
+        pagamentosJson,
+        transporteJson,
+        infoAdicional,
+        xmlString,
+        xmlFilePath,
+        pdfFilePath,
+        now
+      );
     }
 
-    const newId = uuidv4();
-    db.prepare(`
-      INSERT INTO invoices (
-        id, company_id, chave_acesso, numero, serie, modelo, tipo, status,
-        natureza_operacao, data_emissao, data_saida_entrada,
-        emitente_cnpj, emitente_nome, emitente_uf,
-        destinatario_cnpj, destinatario_nome, destinatario_uf,
-        valor_total, valor_produtos, valor_icms, valor_pis, valor_cofins, valor_ipi,
-        itens_json, xml_raw, xml_file_path, pdf_file_path,
-        gdrive_synced, created_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        0, ?
-      )
-    `).run(
-      newId,
-      companyId,
-      parsed.chaveAcesso,
-      parsed.numero,
-      parsed.serie,
-      parsed.modelo,
-      tipo,
-      parsed.status,
-      parsed.naturezaOperacao,
-      parsed.dataEmissao,
-      parsed.dataSaidaEntrada || null,
-      parsed.emitente.cnpjCpf,
-      parsed.emitente.razaoSocial,
-      parsed.emitente.uf,
-      parsed.destinatario.cnpjCpf,
-      parsed.destinatario.razaoSocial,
-      parsed.destinatario.uf,
-      parsed.totais.valorTotal,
-      parsed.totais.valorProdutos,
-      parsed.totais.valorIcms,
-      parsed.totais.valorPis,
-      parsed.totais.valorCofins,
-      parsed.totais.valorIpi,
-      JSON.stringify(parsed.itens),
-      xmlString,
-      xmlFilePath,
-      pdfFilePath,
-      now
-    );
+    // =========================================================================
+    // MÓDULO FINANCEIRO: Sincronizar Duplicatas & Parcelas (Contas a Pagar / Receber)
+    // =========================================================================
+    try {
+      db.prepare('DELETE FROM invoice_installments WHERE invoice_id = ?').run(targetInvoiceId);
 
-    return { invoiceId: newId, chaveAcesso: parsed.chaveAcesso, action: 'created' };
+      const installmentTipo = tipo === 'entrada' ? 'pagar' : 'receber';
+      const partyNome = tipo === 'entrada' ? parsed.emitente.razaoSocial : parsed.destinatario.razaoSocial;
+      const partyCnpj = tipo === 'entrada' ? parsed.emitente.cnpjCpf : parsed.destinatario.cnpjCpf;
+      const defaultForma = parsed.pagamentos?.[0]?.forma || 'Boleto / Duplicata';
+
+      if (parsed.duplicatas && parsed.duplicatas.length > 0) {
+        const insStmt = db.prepare(`
+          INSERT INTO invoice_installments (
+            id, invoice_id, company_id, tipo, numero_fatura, numero_parcela,
+            data_vencimento, valor, status, forma_pagamento, fornecedor_cliente_nome,
+            fornecedor_cliente_cnpj, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?, ?)
+        `);
+
+        for (const dup of parsed.duplicatas) {
+          insStmt.run(
+            uuidv4(),
+            targetInvoiceId,
+            actualCompanyId,
+            installmentTipo,
+            parsed.fatura?.numero || parsed.numero,
+            dup.numero,
+            dup.vencimento || parsed.dataEmissao,
+            dup.valor,
+            defaultForma,
+            partyNome,
+            partyCnpj,
+            now
+          );
+        }
+      } else if (parsed.totais.valorTotal > 0) {
+        db.prepare(`
+          INSERT INTO invoice_installments (
+            id, invoice_id, company_id, tipo, numero_fatura, numero_parcela,
+            data_vencimento, valor, status, forma_pagamento, fornecedor_cliente_nome,
+            fornecedor_cliente_cnpj, created_at
+          ) VALUES (?, ?, ?, ?, ?, '001', ?, ?, 'pendente', ?, ?, ?, ?)
+        `).run(
+          uuidv4(),
+          targetInvoiceId,
+          actualCompanyId,
+          installmentTipo,
+          parsed.fatura?.numero || parsed.numero,
+          parsed.dataSaidaEntrada || parsed.dataEmissao,
+          parsed.totais.valorTotal,
+          defaultForma,
+          partyNome,
+          partyCnpj,
+          now
+        );
+      }
+    } catch (finErr: any) {
+      console.warn(`Aviso ao alimentar módulo financeiro para nota ${parsed.numero}:`, finErr.message);
+    }
+
+    return { invoiceId: targetInvoiceId, chaveAcesso: parsed.chaveAcesso, action };
   }
 
   /**
-   * Synchronize single invoice or pending invoices to Google Drive
+   * Synchronize single invoice to Google Drive
    */
   public async syncInvoiceToDrive(invoiceId: string): Promise<boolean> {
     const invoice = db.prepare(`
@@ -244,7 +362,81 @@ export class SefazService {
   }
 
   /**
-   * Run full sync for a specific company (SEFAZ query + Google Drive upload)
+   * Helper: Verifica se está dentro da janela autorizada SEFAZ (01:00 às 03:00 - Horário de Brasília)
+   */
+  public isWithinSefazWindow(): boolean {
+    const nowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+    const localDate = new Date(nowStr);
+    const hour = localDate.getHours();
+    return hour >= 1 && hour < 3;
+  }
+
+  /**
+   * Registra log de auditoria SEFAZ no SQLite e no arquivo de log do ERP
+   */
+  public logSefazAudit(audit: {
+    companyId: string;
+    cnpj: string;
+    razaoSocial: string;
+    nsuInicial?: string;
+    nsuFinal?: string;
+    maxNsu?: string;
+    notasLocalizadas: number;
+    notasBaixadas: number;
+    cstat?: string;
+    xmotivo?: string;
+    triggerType: 'agendado' | 'manual';
+    duracaoMs: number;
+    iniciadoEm: string;
+    finalizadoEm: string;
+    status: 'sucesso' | 'bloqueado_carência' | 'fora_da_janela' | 'erro';
+    detalhes?: any;
+  }) {
+    try {
+      const id = uuidv4();
+      db.prepare(`
+        INSERT INTO sefaz_audit_logs (
+          id, company_id, cnpj, razao_social, nsu_inicial, nsu_final, max_nsu,
+          notas_localizadas, notas_baixadas, cstat, xmotivo, trigger_type,
+          duracao_ms, iniciado_em, finalizado_em, status, detalhes_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        audit.companyId,
+        audit.cnpj,
+        audit.razaoSocial,
+        audit.nsuInicial || '0',
+        audit.nsuFinal || '0',
+        audit.maxNsu || '0',
+        audit.notasLocalizadas,
+        audit.notasBaixadas,
+        audit.cstat || null,
+        audit.xmotivo || null,
+        audit.triggerType,
+        audit.duracaoMs,
+        audit.iniciadoEm,
+        audit.finalizadoEm,
+        audit.status,
+        audit.detalhes ? JSON.stringify(audit.detalhes) : null
+      );
+
+      // Escreve linha de auditoria no arquivo de logs estruturado C:\VIANFE_ERP_BPO\logs\sefaz_audit.log
+      const logDirs = ['C:\\VIANFE_ERP_BPO\\logs', path.resolve(process.cwd(), 'logs')];
+      const line = `[${audit.iniciadoEm}] [${audit.triggerType.toUpperCase()}] CNPJ: ${audit.cnpj} | ${audit.razaoSocial} | NSU: ${audit.nsuInicial || '0'}->${audit.nsuFinal || '0'} (max: ${audit.maxNsu || '0'}) | Localizadas: ${audit.notasLocalizadas} | Baixadas: ${audit.notasBaixadas} | cStat: ${audit.cstat || 'N/A'} | Motivo: "${audit.xmotivo || ''}" | Status: ${audit.status} | Tempo: ${audit.duracaoMs}ms\n`;
+
+      for (const dir of logDirs) {
+        try {
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.appendFileSync(path.join(dir, 'sefaz_audit.log'), line, 'utf-8');
+        } catch {}
+      }
+    } catch (e: any) {
+      console.warn('[SEFAZ Audit] Falha ao registrar log de auditoria:', e.message);
+    }
+  }
+
+  /**
+   * Run full sync for a specific company (Consults SEFAZ if Certificado A1 is available + Google Drive upload)
    */
   public async syncCompany(
     companyId: string,
@@ -256,18 +448,162 @@ export class SefazService {
     }
 
     const logId = uuidv4();
-    const startTime = new Date().toISOString();
+    const startTimeDate = new Date();
+    const startTime = startTimeDate.toISOString();
+    const nsuInicial = company.last_nsu || '0';
+
+    // 1. Verificação de Janela Noturna (01:00 às 03:00) para chamadas automáticas agendadas
+    if (triggerType === 'agendado' && !this.isWithinSefazWindow()) {
+      const msg = `[SEFAZ] Consulta automática suspensa fora da janela noturna (01:00 às 03:00 - Horário de Brasília). CNPJ: ${company.cnpj}`;
+      console.log(`🌙 ${msg}`);
+
+      this.logSefazAudit({
+        companyId,
+        cnpj: company.cnpj,
+        razaoSocial: company.razao_social,
+        nsuInicial,
+        nsuFinal: nsuInicial,
+        notasLocalizadas: 0,
+        notasBaixadas: 0,
+        triggerType,
+        duracaoMs: 0,
+        iniciadoEm: startTime,
+        finalizadoEm: new Date().toISOString(),
+        status: 'fora_da_janela',
+        xmotivo: 'Execução automática permitida apenas entre 01:00 e 03:00',
+      });
+
+      return { found: 0, downloaded: 0, uploadedToDrive: 0, message: msg };
+    }
+
+    // 2. Verificação de Bloqueio por Carência SEFAZ (evitar cStat 656)
+    if (company.sefaz_locked_until) {
+      const lockDate = new Date(company.sefaz_locked_until);
+      const now = new Date();
+      if (lockDate > now) {
+        const remainMinutes = Math.ceil((lockDate.getTime() - now.getTime()) / 60000);
+        const msg = `Empresa em período de carência da SEFAZ até ${company.sefaz_locked_until} (${remainMinutes} min restantes). Consulta prevenida para evitar Rejeição 656.`;
+        console.log(`⏳ [SEFAZ] ${company.razao_social}: ${msg}`);
+
+        this.logSefazAudit({
+          companyId,
+          cnpj: company.cnpj,
+          razaoSocial: company.razao_social,
+          nsuInicial,
+          nsuFinal: nsuInicial,
+          notasLocalizadas: 0,
+          notasBaixadas: 0,
+          cstat: company.sefaz_last_cstat,
+          xmotivo: company.sefaz_last_xmotivo,
+          triggerType,
+          duracaoMs: 0,
+          iniciadoEm: startTime,
+          finalizadoEm: new Date().toISOString(),
+          status: 'bloqueado_carência',
+        });
+
+        return { found: 0, downloaded: 0, uploadedToDrive: 0, message: msg };
+      }
+    }
 
     db.prepare(`
       INSERT INTO sync_logs (id, company_id, trigger_type, service_type, status, invoices_found, invoices_downloaded, gdrive_uploaded, message, executed_at)
-      VALUES (?, ?, ?, 'geral', 'processando', 0, 0, 0, 'Iniciando sincronização...', ?)
+      VALUES (?, ?, ?, 'geral', 'processando', 0, 0, 0, 'Consultando SEFAZ e sincronizando Drive...', ?)
     `).run(logId, companyId, triggerType, startTime);
 
     let downloadedCount = 0;
     let uploadedCount = 0;
+    let sefazNotesFound = 0;
+    let sefazMotivo = '';
+    let lastCstat = '';
+    let nsuFinal = nsuInicial;
+    let maxNsuRetornado = '0';
 
     try {
-      // Find pending invoices for this company that need Drive sync
+      // 3. Se possuir certificado A1, consultar SEFAZ DFe em loop sequencial seguro
+      if (company.cert_filename) {
+        let hasMore = true;
+        let loopCount = 0;
+        const maxLoops = 30; // Limite de segurança por ciclo
+
+        while (hasMore && loopCount < maxLoops) {
+          loopCount++;
+          try {
+            console.log(`[SEFAZ Loop #${loopCount}] Consultando próximo lote para ${company.razao_social}...`);
+            const sefazResult = await sefazDfeClient.queryDistributionDfe(companyId);
+            sefazMotivo = sefazResult.xMotivo;
+            lastCstat = sefazResult.cStat;
+            nsuFinal = sefazResult.ultNSU || nsuFinal;
+            maxNsuRetornado = sefazResult.maxNSU || '0';
+            sefazNotesFound += sefazResult.documents.length;
+
+            for (const doc of sefazResult.documents) {
+              if (!doc.xmlContent) continue;
+              const hasNfe = doc.xmlContent.includes('<infNFe') || doc.xmlContent.includes('<infNFe>');
+              const hasCte = doc.xmlContent.includes('<infCte') || doc.xmlContent.includes('<infCte>');
+              const isResumo = doc.xmlContent.includes('<resNFe') || doc.xmlContent.includes('<resCTe') || doc.isSummary;
+
+              if (!hasNfe && !hasCte && !isResumo) {
+                console.log(`[SEFAZ] Documento NSU=${doc.nsu} schema=${doc.schema} ignorado (não é NF-e/CT-e ou resumo)`);
+                continue;
+              }
+              try {
+                await this.ingestXml(companyId, doc.xmlContent, 'sefaz_dfe');
+                downloadedCount++;
+              } catch (xmlErr: any) {
+                console.warn(`Erro ao processar XML da SEFAZ (NSU ${doc.nsu}):`, xmlErr.message);
+              }
+            }
+
+            const ult = BigInt(sefazResult.ultNSU || '0');
+            const max = BigInt(sefazResult.maxNSU || '0');
+
+            // Caso cStat 656 (Consumo Indevido): Aplicar trava de 65 minutos
+            if (sefazResult.cStat === '656') {
+              hasMore = false;
+              const lockUntil = new Date(Date.now() + 65 * 60 * 1000).toISOString();
+              db.prepare(`
+                UPDATE companies SET sefaz_locked_until = ?, sefaz_last_cstat = '656', sefaz_last_xmotivo = ? WHERE id = ?
+              `).run(lockUntil, sefazResult.xMotivo, companyId);
+              sefazMotivo = 'SEFAZ: Consumo Indevido (cStat 656). Carência de 65 minutos ativada.';
+              console.log(`🚫 [SEFAZ] Consumo Indevido detectado para ${company.razao_social}. Bloqueando até ${lockUntil}`);
+              break;
+            }
+
+            // Caso cStat 137 (Nenhum documento localizado): Aplicar trava de 60 minutos
+            if (sefazResult.cStat === '137') {
+              hasMore = false;
+              const lockUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+              db.prepare(`
+                UPDATE companies SET sefaz_locked_until = ?, sefaz_last_cstat = '137', sefaz_last_xmotivo = ? WHERE id = ?
+              `).run(lockUntil, sefazResult.xMotivo, companyId);
+              console.log(`✓ [SEFAZ] Lote em dia para ${company.razao_social} (cStat 137). Carência de 60 minutos ativada.`);
+              break;
+            }
+
+            // Caso sucesso com documentos (138)
+            if (sefazResult.cStat === '138') {
+              if (ult >= max || sefazResult.documents.length === 0) {
+                hasMore = false;
+                const lockUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+                db.prepare(`
+                  UPDATE companies SET sefaz_locked_until = ?, sefaz_last_cstat = '138', sefaz_last_xmotivo = ? WHERE id = ?
+                `).run(lockUntil, sefazResult.xMotivo, companyId);
+                console.log(`🏁 [SEFAZ] Todos os lotes baixados até o maxNSU (${sefazResult.maxNSU}) para ${company.razao_social}.`);
+              } else {
+                // Intervalo de segurança anti-rajada entre lotes
+                await new Promise(r => setTimeout(r, 3500));
+              }
+            }
+          } catch (sefazErr: any) {
+            console.warn(`Aviso na consulta SEFAZ para ${company.razao_social}:`, sefazErr.message);
+            sefazMotivo = sefazErr.message;
+            hasMore = false;
+          }
+        }
+      }
+
+      // 4. Upload de notas pendentes no Google Drive
       const pendingInvoices = db.prepare(`
         SELECT id FROM invoices 
         WHERE company_id = ? AND gdrive_synced = 0
@@ -282,12 +618,16 @@ export class SefazService {
         }
       }
 
-      const now = new Date().toISOString();
+      const finishTime = new Date().toISOString();
+      const duracaoMs = Date.now() - startTimeDate.getTime();
+
       db.prepare(`
         UPDATE companies SET last_sync_at = ? WHERE id = ?
-      `).run(now, companyId);
+      `).run(finishTime, companyId);
 
-      const msg = `Sincronização concluída com sucesso. ${uploadedCount} documento(s) enviados para o Google Drive.`;
+      const msg = company.cert_filename
+        ? `SEFAZ: ${sefazMotivo || 'Consulta realizada'} (${downloadedCount} notas baixadas). Drive: ${uploadedCount} arquivo(s) enviados.`
+        : `Sincronização concluída. ${uploadedCount} documento(s) enviados para o Google Drive.`;
 
       db.prepare(`
         UPDATE sync_logs SET
@@ -297,38 +637,58 @@ export class SefazService {
           gdrive_uploaded = ?,
           message = ?
         WHERE id = ?
-      `).run(pendingInvoices.length, downloadedCount, uploadedCount, msg, logId);
+      `).run(sefazNotesFound, downloadedCount, uploadedCount, msg, logId);
 
-      // Update Drive Config timestamp
-      db.prepare(`
-        UPDATE gdrive_configs SET
-          last_sync_at = ?,
-          last_sync_status = 'success',
-          last_sync_message = ?
-        WHERE company_id = ?
-      `).run(now, msg, companyId);
+      // Grava Log de Auditoria Detalhado
+      this.logSefazAudit({
+        companyId,
+        cnpj: company.cnpj,
+        razaoSocial: company.razao_social,
+        nsuInicial,
+        nsuFinal,
+        maxNsu: maxNsuRetornado,
+        notasLocalizadas: sefazNotesFound,
+        notasBaixadas: downloadedCount,
+        cstat: lastCstat,
+        xmotivo: sefazMotivo,
+        triggerType,
+        duracaoMs,
+        iniciadoEm: startTime,
+        finalizadoEm: finishTime,
+        status: lastCstat === '656' ? 'erro' : 'sucesso',
+      });
 
       return {
-        found: pendingInvoices.length,
+        found: sefazNotesFound || pendingInvoices.length,
         downloaded: downloadedCount,
         uploadedToDrive: uploadedCount,
         message: msg,
       };
     } catch (err: any) {
       const errorMsg = `Erro na sincronização: ${err.message}`;
-      db.prepare(`
-        UPDATE sync_logs SET
-          status = 'erro',
-          message = ?
-        WHERE id = ?
-      `).run(errorMsg, logId);
+      const finishTime = new Date().toISOString();
+      const duracaoMs = Date.now() - startTimeDate.getTime();
 
       db.prepare(`
-        UPDATE gdrive_configs SET
-          last_sync_status = 'error',
-          last_sync_message = ?
-        WHERE company_id = ?
-      `).run(errorMsg, companyId);
+        UPDATE sync_logs SET status = 'erro', message = ? WHERE id = ?
+      `).run(errorMsg, logId);
+
+      this.logSefazAudit({
+        companyId,
+        cnpj: company.cnpj,
+        razaoSocial: company.razao_social,
+        nsuInicial,
+        nsuFinal,
+        notasLocalizadas: 0,
+        notasBaixadas: 0,
+        cstat: 'ERR',
+        xmotivo: err.message,
+        triggerType,
+        duracaoMs,
+        iniciadoEm: startTime,
+        finalizadoEm: finishTime,
+        status: 'erro',
+      });
 
       throw err;
     }

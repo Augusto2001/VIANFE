@@ -17,9 +17,11 @@ import {
   Clock,
   Sparkles,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  FileSpreadsheet,
+  FileText,
+  Check
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface CompaniesViewProps {
   companies: Company[];
@@ -49,13 +51,23 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
     razao_social: '',
     nome_fantasia: '',
     ie: '',
-    uf: 'SP',
+    inscricao_municipal: '',
+    uf: 'BA',
     email: '',
     telefone: '',
     sefaz_ambiente: 'producao' as 'producao' | 'homologacao',
     gdrive_folder_name: '',
     sync_frequency: 'daily' as 'manual' | 'hourly' | 'every_6h' | 'daily',
     gdrive_active: true,
+    emite_nfse: true,
+    nfse_tipo_auth: 'certificado',
+    nfse_usuario_prefeitura: '',
+    nfse_senha_prefeitura: '',
+    nfse_prefeitura_padrao: 'Salvador',
+    nfse_aliquota_padrao: 5.0,
+    nfse_iss_retido_padrao: false,
+    item_servico_padrao: '17.01',
+    cnae_padrao: '6920601',
   });
 
   const [cnpjSearching, setCnpjSearching] = useState(false);
@@ -129,20 +141,30 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
     }
   };
 
-  const handleOpenEdit = (comp: Company) => {
+  const handleOpenEdit = (comp: any) => {
     setEditingCompany(comp);
     setFormData({
       cnpj: comp.cnpj,
       razao_social: comp.razao_social,
       nome_fantasia: comp.nome_fantasia || '',
       ie: comp.ie || '',
-      uf: comp.uf,
+      inscricao_municipal: comp.inscricao_municipal || '',
+      uf: comp.uf || 'BA',
       email: comp.email || '',
       telefone: comp.telefone || '',
       sefaz_ambiente: comp.sefaz_ambiente || 'producao',
       gdrive_folder_name: comp.gdrive_folder_name || '',
       sync_frequency: comp.gdrive_sync_frequency || 'daily',
       gdrive_active: comp.gdrive_active !== 0,
+      emite_nfse: comp.emite_nfse === 1 || comp.emite_nfse === true,
+      nfse_tipo_auth: comp.nfse_tipo_auth || 'certificado',
+      nfse_usuario_prefeitura: comp.nfse_usuario_prefeitura || '',
+      nfse_senha_prefeitura: comp.nfse_senha_prefeitura || '',
+      nfse_prefeitura_padrao: comp.nfse_prefeitura_padrao || 'Salvador',
+      nfse_aliquota_padrao: comp.nfse_aliquota_padrao || 5.0,
+      nfse_iss_retido_padrao: comp.nfse_iss_retido_padrao === 1 || comp.nfse_iss_retido_padrao === true,
+      item_servico_padrao: comp.item_servico_padrao || '17.01',
+      cnae_padrao: comp.cnae_padrao || '6920601',
     });
     onOpenModal();
   };
@@ -154,13 +176,23 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
       razao_social: '',
       nome_fantasia: '',
       ie: '',
-      uf: 'SP',
+      inscricao_municipal: '',
+      uf: 'BA',
       email: '',
       telefone: '',
       sefaz_ambiente: 'producao',
       gdrive_folder_name: '',
       sync_frequency: 'daily',
       gdrive_active: true,
+      emite_nfse: true,
+      nfse_tipo_auth: 'certificado',
+      nfse_usuario_prefeitura: '',
+      nfse_senha_prefeitura: '',
+      nfse_prefeitura_padrao: 'Salvador',
+      nfse_aliquota_padrao: 5.0,
+      nfse_iss_retido_padrao: false,
+      item_servico_padrao: '17.01',
+      cnae_padrao: '6920601',
     });
     setErrorMsg('');
     onCloseModal();
@@ -185,7 +217,6 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
     try {
       setCertUploading(true);
       await api.uploadCertificate(certModalCompany.id, certFile, certPassword);
-      confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
       alert('Certificado Digital A1 importado e protegido com sucesso!');
       setCertModalCompany(null);
       setCertFile(null);
@@ -537,6 +568,143 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
                     </label>
                   </div>
                 </div>
+              </div>
+
+              {/* NFS-e Municipal Configuration Section */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-indigo-400 font-semibold">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Emissão de Notas de Serviço (NFS-e)</span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 font-bold">
+                    <input
+                      type="checkbox"
+                      checked={formData.emite_nfse}
+                      onChange={(e) => setFormData({ ...formData, emite_nfse: e.target.checked })}
+                      className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-0 w-4 h-4"
+                    />
+                    <span>Esta empresa emite NFS-e?</span>
+                  </label>
+                </div>
+
+                {formData.emite_nfse && (
+                  <div className="space-y-3 pt-2 border-t border-slate-800/80 animate-fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Prefeitura / Provedor Padrão</label>
+                        <select
+                          value={formData.nfse_prefeitura_padrao || 'Salvador'}
+                          onChange={(e) => setFormData({ ...formData, nfse_prefeitura_padrao: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-medium"
+                        >
+                          <option value="Salvador">Salvador / BA</option>
+                          <option value="Feira de Santana">Feira de Santana / BA</option>
+                          <option value="Lauro de Freitas">Lauro de Freitas / BA</option>
+                          <option value="São Gonçalo dos Campos">São Gonçalo dos Campos / BA</option>
+                          <option value="Curitiba">Curitiba / PR</option>
+                          <option value="Portal Nacional ADN (nfse.gov.br)">Portal Nacional ADN (nfse.gov.br)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Tipo de Autenticação</label>
+                        <select
+                          value={formData.nfse_tipo_auth || 'certificado'}
+                          onChange={(e) => setFormData({ ...formData, nfse_tipo_auth: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-medium"
+                        >
+                          <option value="certificado">Certificado Digital A1 (Recomendado)</option>
+                          <option value="login_senha">Login e Senha da Prefeitura</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Usuário / Login da Prefeitura</label>
+                        <input
+                          type="text"
+                          placeholder="Deixe em branco para usar Certificado Digital A1"
+                          value={formData.nfse_usuario_prefeitura || ''}
+                          onChange={(e) => setFormData({ ...formData, nfse_usuario_prefeitura: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Senha da Prefeitura</label>
+                        <input
+                          type="password"
+                          placeholder="Deixe em branco para usar Certificado Digital A1"
+                          value={formData.nfse_senha_prefeitura || ''}
+                          onChange={(e) => setFormData({ ...formData, nfse_senha_prefeitura: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Inscrição Municipal (IM) *</label>
+                        <input
+                          type="text"
+                          placeholder="Nº da Inscrição em Salvador"
+                          value={formData.inscricao_municipal || ''}
+                          onChange={(e) => setFormData({ ...formData, inscricao_municipal: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono font-bold text-cyan-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Item Serviço (LC 116 / CTM)</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 17.01"
+                          value={formData.item_servico_padrao || '17.01'}
+                          onChange={(e) => setFormData({ ...formData, item_servico_padrao: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">CNAE Principal</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 6920-6/01"
+                          value={formData.cnae_padrao || ''}
+                          onChange={(e) => setFormData({ ...formData, cnae_padrao: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-semibold mb-1 text-xs">Alíquota Padrão de ISS (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={formData.nfse_aliquota_padrao || 5.0}
+                          onChange={(e) => setFormData({ ...formData, nfse_aliquota_padrao: parseFloat(e.target.value) })}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono"
+                        />
+                      </div>
+
+                      <div className="flex items-center pt-5">
+                        <label className="flex items-center gap-2 cursor-pointer text-slate-300 text-xs font-medium">
+                          <input
+                            type="checkbox"
+                            checked={formData.nfse_iss_retido_padrao}
+                            onChange={(e) => setFormData({ ...formData, nfse_iss_retido_padrao: e.target.checked })}
+                            className="rounded bg-slate-900 border-slate-700 text-indigo-500 focus:ring-0 w-4 h-4"
+                          />
+                          <span>ISS Retido na Fonte por padrão</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Footer Modal Buttons */}

@@ -18,11 +18,23 @@ build/
 server/storage/certs/*.pfx
 server/storage/certs/*.p12
 server/storage/data/*.db*
-!server/storage/samples/*
+server/storage/pdfs/*
+server/storage/xmls/*
+server/storage/CLIENTES*
+server/storage/*.sqlite*
+database.sqlite
+*.db
+*.sqlite
+*.zip
+*.pfx
+*.p12
+*.pdf
+!client/public/*.pdf
 
 # Logs do Sistema
 *.log
 .system_generated/
+scratch/
 
 # IDE e Sistema Operacional
 .DS_Store

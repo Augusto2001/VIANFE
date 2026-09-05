@@ -39,6 +39,51 @@ export interface ParsedFiscalItem {
   };
 }
 
+export interface ParsedDuplicata {
+  numero: string;
+  vencimento: string;
+  valor: number;
+}
+
+export interface ParsedFatura {
+  numero?: string;
+  valorOriginal?: number;
+  valorDesconto?: number;
+  valorLiquido?: number;
+}
+
+export interface ParsedPagamento {
+  forma: string;
+  formaCodigo: string;
+  valor: number;
+}
+
+export interface ParsedTransporte {
+  modalidadeFrete: string;
+  modalidadeCodigo: string;
+  transportadora?: {
+    cnpjCpf?: string;
+    razaoSocial?: string;
+    ie?: string;
+    endereco?: string;
+    municipio?: string;
+    uf?: string;
+  };
+  veiculo?: {
+    placa?: string;
+    uf?: string;
+    rntc?: string;
+  };
+  volumes?: {
+    quantidade?: number;
+    especie?: string;
+    marca?: string;
+    numeracao?: string;
+    pesoLiquido?: number;
+    pesoBruto?: number;
+  };
+}
+
 export interface ParsedFiscalInvoice {
   chaveAcesso: string;
   numero: string;
@@ -61,6 +106,7 @@ export interface ParsedFiscalInvoice {
     numero?: string;
     bairro?: string;
     cep?: string;
+    fone?: string;
   };
 
   destinatario: {
@@ -73,6 +119,7 @@ export interface ParsedFiscalInvoice {
     numero?: string;
     bairro?: string;
     cep?: string;
+    fone?: string;
   };
 
   totais: {
@@ -92,9 +139,14 @@ export interface ParsedFiscalInvoice {
   };
 
   itens: ParsedFiscalItem[];
+  fatura?: ParsedFatura;
+  duplicatas: ParsedDuplicata[];
+  pagamentos: ParsedPagamento[];
+  transporte?: ParsedTransporte;
   protocoloAutorizacao?: string;
   dataAutorizacao?: string;
   informacoesComplementares?: string;
+  informacoesFisco?: string;
 }
 
 const parser = new XMLParser({
@@ -108,6 +160,16 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
   try {
     const parsed = parser.parse(xmlContent);
 
+    // 1. Check for resNFe (Resumo de NF-e da SEFAZ)
+    if (parsed.resNFe) {
+      return parseResNFe(parsed.resNFe);
+    }
+
+    // 2. Check for resCTe (Resumo de CT-e da SEFAZ)
+    if (parsed.resCTe) {
+      return parseResCTe(parsed.resCTe);
+    }
+
     // Support both <nfeProc> (with protocol) and root <NFe>
     const nfeProc = parsed.nfeProc || parsed;
     const nfe = nfeProc.NFe || parsed.NFe;
@@ -119,7 +181,7 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       if (cte && cte.infCte) {
         return parseCte(cte, cteProc.protCTe);
       }
-      throw new Error('Formato XML fiscal não reconhecido (não contém <infNFe> ou <infCte>).');
+      throw new Error('Formato XML fiscal não reconhecido (não contém <infNFe>, <infCte>, <resNFe> ou <resCTe>).');
     }
 
     const infNFe = nfe.infNFe;
@@ -189,6 +251,96 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
     const emitEnder = emit.enderEmit || {};
     const destEnder = dest.enderDest || {};
 
+    // Extract Fatura & Duplicatas (Cobrança)
+    const cobr = infNFe.cobr || {};
+    const fat = cobr.fat || {};
+    const fatura: ParsedFatura | undefined = fat.nFat || fat.vLiq ? {
+      numero: String(fat.nFat || ''),
+      valorOriginal: parseFloat(fat.vOrig || '0'),
+      valorDesconto: parseFloat(fat.vDesc || '0'),
+      valorLiquido: parseFloat(fat.vLiq || '0'),
+    } : undefined;
+
+    const rawDup = Array.isArray(cobr.dup) ? cobr.dup : (cobr.dup ? [cobr.dup] : []);
+    const duplicatas: ParsedDuplicata[] = rawDup.map((d: any, idx: number) => ({
+      numero: String(d.nDup || String(idx + 1).padStart(3, '0')),
+      vencimento: String(d.dVenc || ''),
+      valor: parseFloat(d.vDup || '0'),
+    }));
+
+    // Extract Pagamentos
+    const formaPagamentoMap: Record<string, string> = {
+      '01': 'Dinheiro',
+      '02': 'Cheque',
+      '03': 'Cartão de Crédito',
+      '04': 'Cartão de Débito',
+      '05': 'Crédito Loja',
+      '10': 'Vale Alimentação',
+      '11': 'Vale Refeição',
+      '12': 'Vale Presente',
+      '13': 'Vale Combustível',
+      '14': 'Duplicata Mercantil',
+      '15': 'Boleto Bancário',
+      '16': 'Depósito Bancário',
+      '17': 'PIX (Pagamento Instantâneo)',
+      '18': 'Transferência bancária',
+      '19': 'Programa de fidelidade',
+      '90': 'Sem Pagamento',
+      '99': 'Outros'
+    };
+
+    const pag = infNFe.pag || {};
+    const rawDetPag = Array.isArray(pag.detPag) ? pag.detPag : (pag.detPag ? [pag.detPag] : []);
+    const pagamentos: ParsedPagamento[] = rawDetPag.map((p: any) => {
+      const code = String(p.tPag || '99').padStart(2, '0');
+      return {
+        formaCodigo: code,
+        forma: formaPagamentoMap[code] || `Forma (${code})`,
+        valor: parseFloat(p.vPag || '0'),
+      };
+    });
+
+    // Extract Transporte
+    const transp = infNFe.transp || {};
+    const modFreteMap: Record<string, string> = {
+      '0': '0 - Por conta do Emitente (CIF)',
+      '1': '1 - Por conta do Destinatário (FOB)',
+      '2': '2 - Por conta de Terceiros',
+      '3': '3 - Transporte Próprio (Remetente)',
+      '4': '4 - Transporte Próprio (Destinatário)',
+      '9': '9 - Sem Ocorrência de Transporte',
+    };
+    const modCode = String(transp.modFrete ?? '9');
+    const transporta = transp.transporta || {};
+    const veicTransp = transp.veicTransp || {};
+    const volNode = Array.isArray(transp.vol) ? transp.vol[0] : (transp.vol || {});
+
+    const transporte: ParsedTransporte = {
+      modalidadeCodigo: modCode,
+      modalidadeFrete: modFreteMap[modCode] || `Frete (${modCode})`,
+      transportadora: transporta.xNome || transporta.CNPJ || transporta.CPF ? {
+        cnpjCpf: cleanNumeric(transporta.CNPJ || transporta.CPF || ''),
+        razaoSocial: String(transporta.xNome || ''),
+        ie: transporta.IE ? String(transporta.IE) : undefined,
+        endereco: transporta.xEnder ? String(transporta.xEnder) : undefined,
+        municipio: transporta.xMun ? String(transporta.xMun) : undefined,
+        uf: transporta.UF ? String(transporta.UF) : undefined,
+      } : undefined,
+      veiculo: veicTransp.placa ? {
+        placa: String(veicTransp.placa || ''),
+        uf: String(veicTransp.UF || ''),
+        rntc: veicTransp.RNTC ? String(veicTransp.RNTC) : undefined,
+      } : undefined,
+      volumes: volNode.qVol || volNode.pesoB || volNode.pesoL || volNode.esp ? {
+        quantidade: volNode.qVol ? parseFloat(volNode.qVol) : undefined,
+        especie: volNode.esp ? String(volNode.esp) : undefined,
+        marca: volNode.marca ? String(volNode.marca) : undefined,
+        numeracao: volNode.nVol ? String(volNode.nVol) : undefined,
+        pesoLiquido: volNode.pesoL ? parseFloat(volNode.pesoL) : undefined,
+        pesoBruto: volNode.pesoB ? parseFloat(volNode.pesoB) : undefined,
+      } : undefined,
+    };
+
     return {
       chaveAcesso: chave,
       numero: String(ide.nNF || '0'),
@@ -211,6 +363,7 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
         numero: String(emitEnder.nro || ''),
         bairro: String(emitEnder.xBairro || ''),
         cep: cleanNumeric(emitEnder.CEP || ''),
+        fone: emitEnder.fone ? String(emitEnder.fone) : undefined,
       },
 
       destinatario: {
@@ -223,6 +376,7 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
         numero: String(destEnder.nro || ''),
         bairro: String(destEnder.xBairro || ''),
         cep: cleanNumeric(destEnder.CEP || ''),
+        fone: destEnder.fone ? String(destEnder.fone) : undefined,
       },
 
       totais: {
@@ -242,9 +396,14 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       },
 
       itens,
+      fatura,
+      duplicatas,
+      pagamentos,
+      transporte,
       protocoloAutorizacao: protNFe.nProt ? String(protNFe.nProt) : undefined,
       dataAutorizacao: protNFe.dhRecbto ? String(protNFe.dhRecbto) : undefined,
       informacoesComplementares: infNFe.infAdic?.infCpl ? String(infNFe.infAdic.infCpl) : undefined,
+      informacoesFisco: infNFe.infAdic?.infAdFisco ? String(infNFe.infAdic.infAdFisco) : undefined,
     };
   } catch (err: any) {
     throw new Error(`Erro ao processar XML Fiscal: ${err.message}`);
@@ -303,6 +462,121 @@ function parseCte(cte: any, protCTe: any): ParsedFiscalInvoice {
       valorIpi: 0,
     },
     itens: [],
+    duplicatas: [],
+    pagamentos: [],
     protocoloAutorizacao: prot.nProt ? String(prot.nProt) : undefined,
+  };
+}
+
+const UF_CODE_MAP: Record<string, string> = {
+  '11': 'RO', '12': 'AC', '13': 'AM', '14': 'RR', '15': 'PA', '16': 'AP', '17': 'TO',
+  '21': 'MA', '22': 'PI', '23': 'CE', '24': 'RN', '25': 'PB', '26': 'PE', '27': 'AL',
+  '28': 'SE', '29': 'BA', '31': 'MG', '32': 'ES', '33': 'RJ', '35': 'SP', '41': 'PR',
+  '42': 'SC', '43': 'RS', '50': 'MS', '51': 'MT', '52': 'GO', '53': 'DF'
+};
+
+function parseResNFe(resNFe: any): ParsedFiscalInvoice {
+  const chNFe = cleanNumeric(resNFe.chNFe || '');
+  const modelo = chNFe.length >= 22 ? chNFe.substring(20, 22) : '55';
+  const serie = chNFe.length >= 25 ? parseInt(chNFe.substring(22, 25) || '1', 10).toString() : '1';
+  const numero = chNFe.length >= 34 ? parseInt(chNFe.substring(25, 34) || '0', 10).toString() : '0';
+  const vNF = parseFloat(resNFe.vNF || '0');
+  const cSitNFe = String(resNFe.cSitNFe || '1');
+  const status = cSitNFe === '1' ? 'autorizada' : (cSitNFe === '2' ? 'cancelada' : 'denegada');
+
+  return {
+    chaveAcesso: chNFe,
+    numero: numero || '0',
+    serie: serie || '1',
+    modelo: modelo || '55',
+    naturezaOperacao: 'Resumo NF-e (SEFAZ DFe)',
+    tipoOperacao: String(resNFe.tpNF ?? '1') as '0' | '1',
+    dataEmissao: resNFe.dhEmi || new Date().toISOString(),
+    status,
+    emitente: {
+      cnpjCpf: cleanNumeric(resNFe.CNPJ || resNFe.CPF || ''),
+      razaoSocial: String(resNFe.xNome || 'Emitente'),
+      ie: resNFe.IE ? String(resNFe.IE) : undefined,
+      uf: chNFe.length >= 2 ? (UF_CODE_MAP[chNFe.substring(0, 2)] || '') : '',
+    },
+    destinatario: {
+      cnpjCpf: '',
+      razaoSocial: '',
+      uf: '',
+    },
+    totais: {
+      valorProdutos: vNF,
+      valorFrete: 0,
+      valorSeguro: 0,
+      valorDesconto: 0,
+      valorOutrasDespesas: 0,
+      valorTotal: vNF,
+      baseCalculoIcms: 0,
+      valorIcms: 0,
+      baseCalculoIcmsSt: 0,
+      valorIcmsSt: 0,
+      valorPis: 0,
+      valorCofins: 0,
+      valorIpi: 0,
+    },
+    itens: [],
+    duplicatas: [],
+    pagamentos: [],
+    protocoloAutorizacao: resNFe.dhRecbto ? String(resNFe.dhRecbto) : undefined,
+    dataAutorizacao: resNFe.dhRecbto ? String(resNFe.dhRecbto) : undefined,
+    informacoesComplementares: 'Resumo de NF-e obtido via SEFAZ Nacional (Aguardando manifestação / XML completo).',
+  };
+}
+
+function parseResCTe(resCTe: any): ParsedFiscalInvoice {
+  const chCTe = cleanNumeric(resCTe.chCTe || '');
+  const modelo = chCTe.length >= 22 ? chCTe.substring(20, 22) : '57';
+  const serie = chCTe.length >= 25 ? parseInt(chCTe.substring(22, 25) || '1', 10).toString() : '1';
+  const numero = chCTe.length >= 34 ? parseInt(chCTe.substring(25, 34) || '0', 10).toString() : '0';
+  const vNF = parseFloat(resCTe.vNF || '0');
+  const cSitCTe = String(resCTe.cSitCTe || '1');
+  const status = cSitCTe === '1' ? 'autorizada' : (cSitCTe === '2' ? 'cancelada' : 'denegada');
+
+  return {
+    chaveAcesso: chCTe,
+    numero: numero || '0',
+    serie: serie || '1',
+    modelo: modelo || '57',
+    naturezaOperacao: 'Resumo CT-e (SEFAZ DFe)',
+    tipoOperacao: String(resCTe.tpNF ?? '1') as '0' | '1',
+    dataEmissao: resCTe.dhEmi || new Date().toISOString(),
+    status,
+    emitente: {
+      cnpjCpf: cleanNumeric(resCTe.CNPJ || resCTe.CPF || ''),
+      razaoSocial: String(resCTe.xNome || 'Transportador'),
+      ie: resCTe.IE ? String(resCTe.IE) : undefined,
+      uf: chCTe.length >= 2 ? (UF_CODE_MAP[chCTe.substring(0, 2)] || '') : '',
+    },
+    destinatario: {
+      cnpjCpf: '',
+      razaoSocial: '',
+      uf: '',
+    },
+    totais: {
+      valorProdutos: vNF,
+      valorFrete: 0,
+      valorSeguro: 0,
+      valorDesconto: 0,
+      valorOutrasDespesas: 0,
+      valorTotal: vNF,
+      baseCalculoIcms: 0,
+      valorIcms: 0,
+      baseCalculoIcmsSt: 0,
+      valorIcmsSt: 0,
+      valorPis: 0,
+      valorCofins: 0,
+      valorIpi: 0,
+    },
+    itens: [],
+    duplicatas: [],
+    pagamentos: [],
+    protocoloAutorizacao: resCTe.dhRecbto ? String(resCTe.dhRecbto) : undefined,
+    dataAutorizacao: resCTe.dhRecbto ? String(resCTe.dhRecbto) : undefined,
+    informacoesComplementares: 'Resumo de CT-e obtido via SEFAZ Nacional (Aguardando manifestação / XML completo).',
   };
 }

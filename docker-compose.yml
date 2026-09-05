@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  vianfe-postgres:
+    image: postgres:16-alpine
+    container_name: vianfe-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: vianfe_db
+      POSTGRES_USER: vianfe_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vianfe_secure_pg_pass_2026}
+    volumes:
+      - vianfe_pgdata:/var/lib/postgresql/data
+    networks:
+      - vianfe_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vianfe_user -d vianfe_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vianfe-redis:
+    image: redis:7-alpine
+    container_name: vianfe-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - vianfe_redisdata:/data
+    networks:
+      - vianfe_internal
+
+  vianfe-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vianfe-api
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgres://vianfe_user:${POSTGRES_PASSWORD:-vianfe_secure_pg_pass_2026}@vianfe-postgres:5432/vianfe_db
+      REDIS_URL: redis://vianfe-redis:6379
+      JWT_SECRET: ${JWT_SECRET:-vianfe_viacont_fiscal_jwt_secret_key_2026}
+      SEFAZ_RELAY_URL: ${SEFAZ_RELAY_URL:-https://sefaz-relay.contadordev.com.br}
+      APP_DOMAIN: ${APP_DOMAIN:-https://vianfe.contadordev.com.br}
+    volumes:
+      - ./server/storage:/app/server/storage
+    depends_on:
+      vianfe-postgres:
+        condition: service_healthy
+      vianfe-redis:
+        condition: service_started
+    networks:
+      - vianfe_internal
+      - nginx-proxy-manager_default
+
+networks:
+  vianfe_internal:
+    driver: bridge
+  nginx-proxy-manager_default:
+    external: true
+
+volumes:
+  vianfe_pgdata:
+  vianfe_redisdata:

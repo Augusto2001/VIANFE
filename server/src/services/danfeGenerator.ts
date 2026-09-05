@@ -11,11 +11,11 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margin: 20,
+      margin: 15,
       info: {
         Title: `DANFE - NF-e ${invoice.numero}`,
-        Author: 'DF-e Hub Contabilidade',
-        Subject: `Nota Fiscal Eletrônica nº ${invoice.numero} Série ${invoice.serie}`,
+        Author: 'DF-e Hub Contabilidade / SEFAZ Nacional',
+        Subject: `Documento Auxiliar da Nota Fiscal Eletrônica nº ${invoice.numero} Série ${invoice.serie}`,
       }
     });
 
@@ -24,10 +24,26 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
 
     // Helpers
     const formatCurrency = (val?: number) => {
-      return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      if (val === undefined || val === null || isNaN(val)) return '0,00';
+      return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
-    const formatDate = (dateStr?: string) => {
+    const formatDateOnly = (dateStr?: string) => {
+      if (!dateStr) return '';
+      try {
+        const clean = dateStr.split('T')[0];
+        const [year, month, day] = clean.split('-');
+        if (year && month && day) {
+          return `${day}/${month}/${year}`;
+        }
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('pt-BR');
+      } catch {
+        return dateStr;
+      }
+    };
+
+    const formatDateTime = (dateStr?: string) => {
       if (!dateStr) return '';
       try {
         const d = new Date(dateStr);
@@ -37,142 +53,504 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
       }
     };
 
-    // Header box: DANFE
-    doc.rect(20, 20, 555, 95).stroke('#334155');
+    const left = 15;
+    const width = 565;
+    let y = 15;
 
-    // Left: Emitente
-    doc.fontSize(9).font('Helvetica-Bold').fillColor('#0f172a');
-    doc.text(invoice.emitente.razaoSocial.toUpperCase(), 25, 25, { width: 230, ellipsis: true });
-    doc.fontSize(7).font('Helvetica').fillColor('#334155');
-    if (invoice.emitente.logradouro) {
-      doc.text(`${invoice.emitente.logradouro}, ${invoice.emitente.numero || 'S/N'} - ${invoice.emitente.bairro || ''}`, 25, 45, { width: 230 });
-      doc.text(`${invoice.emitente.municipio || ''} - ${invoice.emitente.uf || ''} | CEP: ${invoice.emitente.cep || ''}`, 25, 57, { width: 230 });
+    // =========================================================================
+    // 1. CANHOTO DE RECEBIMENTO (Padrão Nacional SEFAZ)
+    // =========================================================================
+    doc.lineWidth(0.5).rect(left, y, width - 110, 26).stroke('#000000');
+    doc.fontSize(5).font('Helvetica').fillColor('#000000');
+    doc.text(
+      `RECEBEMOS DE ${invoice.emitente.razaoSocial.toUpperCase().substring(0, 75)} OS PRODUTOS / SERVIÇOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO`,
+      left + 4,
+      y + 3,
+      { width: width - 120 }
+    );
+
+    doc.rect(left, y + 26, 140, 18).stroke('#000000');
+    doc.fontSize(4.5).text('DATA DE RECEBIMENTO', left + 3, y + 28);
+
+    doc.rect(left + 140, y + 26, width - 250, 18).stroke('#000000');
+    doc.fontSize(4.5).text('IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR', left + 143, y + 28);
+
+    // Canhoto Right Box: NF-e Nº
+    doc.rect(left + width - 110, y, 110, 44).stroke('#000000');
+    doc.fontSize(7.5).font('Helvetica-Bold').text('NF-e', left + width - 110, y + 4, { align: 'center', width: 110 });
+    doc.fontSize(6.5).text(`Nº ${invoice.numero}`, left + width - 110, y + 16, { align: 'center', width: 110 });
+    doc.fontSize(5.5).font('Helvetica').text(`SÉRIE ${invoice.serie}`, left + width - 110, y + 27, { align: 'center', width: 110 });
+
+    y += 48;
+
+    // Linha tracejada separadora do canhoto
+    doc.save().dash(2, { space: 2 }).moveTo(left, y).lineTo(left + width, y).stroke('#000000').restore();
+    y += 4;
+
+    // =========================================================================
+    // 2. CABEÇALHO DO DANFE: EMITENTE | DANFE IDENTIFICAÇÃO | CHAVE & CÓDIGO DE BARRAS
+    // =========================================================================
+    const headerHeight = 94;
+
+    // Box 1: Emitente (Left)
+    doc.rect(left, y, 225, headerHeight).stroke('#000000');
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000');
+    doc.text(invoice.emitente.razaoSocial.toUpperCase(), left + 5, y + 5, { width: 215, height: 24, ellipsis: true });
+    
+    doc.fontSize(6).font('Helvetica').fillColor('#000000');
+    const emitAddr = `${invoice.emitente.logradouro || ''}, ${invoice.emitente.numero || 'S/N'} ${invoice.emitente.bairro ? `- ${invoice.emitente.bairro}` : ''}`;
+    doc.text(emitAddr, left + 5, y + 30, { width: 215 });
+    doc.text(`${invoice.emitente.municipio || ''} - ${invoice.emitente.uf || ''} | CEP: ${invoice.emitente.cep || ''}`, left + 5, y + 40, { width: 215 });
+    if (invoice.emitente.fone) {
+      doc.text(`FONE: ${invoice.emitente.fone}`, left + 5, y + 50, { width: 215 });
     }
-    doc.text(`CNPJ: ${formatCNPJ(invoice.emitente.cnpjCpf)}  IE: ${invoice.emitente.ie || 'ISENTO'}`, 25, 72, { width: 230 });
 
-    // Center: DANFE box
-    doc.rect(260, 20, 110, 95).stroke('#64748b');
-    doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('DANFE', 260, 25, { align: 'center', width: 110 });
-    doc.fontSize(6).font('Helvetica').fillColor('#475569').text('DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA', 265, 38, { align: 'center', width: 100 });
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a');
-    doc.text(`0 - ENTRADA`, 265, 58);
-    doc.text(`1 - SAÍDA [ ${invoice.tipoOperacao === '1' ? '1' : '0'} ]`, 265, 68);
-    doc.fontSize(7).text(`Nº: ${invoice.numero}`, 265, 82);
-    doc.text(`SÉRIE: ${invoice.serie}`, 265, 94);
+    // Box 2: DANFE Central Box (Middle)
+    doc.rect(left + 225, y, 105, headerHeight).stroke('#000000');
+    doc.fontSize(11).font('Helvetica-Bold').text('DANFE', left + 225, y + 4, { align: 'center', width: 105 });
+    doc.fontSize(5).font('Helvetica').text('DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA', left + 227, y + 16, { align: 'center', width: 101 });
+    
+    // Indicador 0 - Entrada / 1 - Saída com checkbox nacional
+    const isSaida = invoice.tipoOperacao === '1';
+    doc.fontSize(6).font('Helvetica');
+    doc.text('0 - ENTRADA', left + 232, y + 33);
+    doc.text('1 - SAÍDA', left + 232, y + 44);
+    doc.rect(left + 285, y + 34, 15, 15).stroke('#000000');
+    doc.fontSize(9).font('Helvetica-Bold').text(isSaida ? '1' : '0', left + 285, y + 37, { align: 'center', width: 15 });
 
-    // Right: Chave de Acesso
-    doc.rect(375, 20, 200, 95).stroke('#64748b');
-    doc.fontSize(7).font('Helvetica-Bold').fillColor('#0f172a').text('CHAVE DE ACESSO', 380, 25);
-    doc.fontSize(7.5).font('Courier-Bold').fillColor('#0284c7').text(formatChaveAcesso(invoice.chaveAcesso), 380, 36, { width: 190 });
+    doc.fontSize(7).font('Helvetica-Bold');
+    doc.text(`Nº ${invoice.numero}`, left + 225, y + 62, { align: 'center', width: 105 });
+    doc.fontSize(6).text(`SÉRIE ${invoice.serie}`, left + 225, y + 72, { align: 'center', width: 105 });
+    doc.fontSize(5.5).font('Helvetica').text('FOLHA 1/1', left + 225, y + 82, { align: 'center', width: 105 });
+
+    // Box 3: Chave de Acesso & Código de Barras (Right)
+    doc.rect(left + 330, y, width - 330, headerHeight).stroke('#000000');
     
-    doc.fontSize(6.5).font('Helvetica').fillColor('#475569');
-    doc.text('Consulta de autenticidade no portal nacional da NF-e', 380, 60, { width: 190 });
-    doc.text('www.nfe.fazenda.gov.br/portal ou no site da Sefaz Autorizadora', 380, 68, { width: 190 });
+    // Simulação Vetorial de Código de Barras Code 128 (Padrão SEFAZ)
+    const barcodeX = left + 338;
+    const barcodeY = y + 5;
+    const barcodeW = width - 346;
+    const barcodeH = 24;
+    doc.rect(barcodeX, barcodeY, barcodeW, barcodeH).fill('#ffffff').stroke('#000000');
     
+    doc.fillColor('#000000');
+    for (let b = 0; b < barcodeW - 8; b += 3.2) {
+      const barW = (b % 7 === 0 || b % 5 === 0) ? 1.8 : 0.8;
+      doc.rect(barcodeX + 4 + b, barcodeY + 2, barW, barcodeH - 4).fill('#000000');
+    }
+
+    doc.fontSize(5).font('Helvetica-Bold').fillColor('#000000').text('CHAVE DE ACESSO', left + 335, y + 33);
+    doc.fontSize(7).font('Courier-Bold').fillColor('#000000').text(formatChaveAcesso(invoice.chaveAcesso), left + 335, y + 41, { width: width - 340 });
+
+    doc.fontSize(5).font('Helvetica').text('Consulta de autenticidade no portal nacional da NF-e', left + 335, y + 56);
+    doc.text('www.nfe.fazenda.gov.br/portal ou no site da Sefaz Autorizadora', left + 335, y + 63);
+
     if (invoice.protocoloAutorizacao) {
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#0f172a');
-      doc.text(`PROTOCOLO: ${invoice.protocoloAutorizacao}`, 380, 85);
-      doc.fontSize(6.5).font('Helvetica').text(`DATA/HORA: ${formatDate(invoice.dataAutorizacao)}`, 380, 96);
+      doc.fontSize(5.5).font('Helvetica-Bold').text(`PROTOCOLO DE AUTORIZAÇÃO DE USO`, left + 335, y + 73);
+      doc.fontSize(6).font('Helvetica').text(`${invoice.protocoloAutorizacao} - ${formatDateTime(invoice.dataAutorizacao)}`, left + 335, y + 81);
     }
 
-    // Natureza da Operação
-    doc.rect(20, 120, 555, 25).stroke('#cbd5e1');
-    doc.fontSize(6).font('Helvetica-Bold').fillColor('#475569').text('NATUREZA DA OPERAÇÃO', 25, 123);
-    doc.fontSize(8).font('Helvetica').fillColor('#0f172a').text(invoice.naturezaOperacao || 'VENDA', 25, 132);
+    y += headerHeight;
 
-    // Destinatário
-    doc.rect(20, 150, 555, 50).stroke('#334155');
-    doc.fontSize(7).font('Helvetica-Bold').fillColor('#0f172a').text('DESTINATÁRIO / REMETENTE', 25, 153);
-    doc.fontSize(6.5).font('Helvetica').fillColor('#475569');
-    doc.text(`NOME / RAZÃO SOCIAL: ${invoice.destinatario.razaoSocial}`, 25, 165);
-    doc.text(`CNPJ/CPF: ${formatCNPJ(invoice.destinatario.cnpjCpf)}`, 380, 165);
-    doc.text(`ENDEREÇO: ${invoice.destinatario.logradouro || ''}, ${invoice.destinatario.numero || ''} - ${invoice.destinatario.bairro || ''}`, 25, 177);
-    doc.text(`MUNICÍPIO: ${invoice.destinatario.municipio || ''} - ${invoice.destinatario.uf || ''}`, 380, 177);
-    doc.text(`DATA EMISSÃO: ${formatDate(invoice.dataEmissao)}`, 25, 189);
-    doc.text(`INSCRIÇÃO ESTADUAL: ${invoice.destinatario.ie || 'ISENTO'}`, 380, 189);
+    // =========================================================================
+    // 3. NATUREZA DA OPERAÇÃO & INSCRIÇÕES ESTADUAIS
+    // =========================================================================
+    const natHeight = 20;
+    doc.rect(left, y, 330, natHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('NATUREZA DA OPERAÇÃO', left + 3, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.naturezaOperacao || 'VENDA DE MERCADORIAS', left + 3, y + 9, { width: 324 });
 
-    // Totais e Impostos
-    doc.rect(20, 205, 555, 45).stroke('#334155');
-    doc.fontSize(7).font('Helvetica-Bold').fillColor('#0f172a').text('CÁLCULO DO IMPOSTO', 25, 208);
+    doc.rect(left + 330, y, width - 330, natHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('PROTOCOLO DE AUTORIZAÇÃO DE USO', left + 333, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.protocoloAutorizacao ? `${invoice.protocoloAutorizacao} - ${formatDateTime(invoice.dataAutorizacao)}` : 'AUTORIZADA', left + 333, y + 9);
+
+    y += natHeight;
+
+    const ieHeight = 20;
+    doc.rect(left, y, 185, ieHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('INSCRIÇÃO ESTADUAL', left + 3, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.emitente.ie || 'ISENTO', left + 3, y + 9);
+
+    doc.rect(left + 185, y, 185, ieHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('INSCRIÇÃO ESTADUAL DO SUBST. TRIB.', left + 188, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text('', left + 188, y + 9);
+
+    doc.rect(left + 370, y, width - 370, ieHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('CNPJ', left + 373, y + 2);
+    doc.fontSize(7).font('Helvetica-Bold').text(formatCNPJ(invoice.emitente.cnpjCpf), left + 373, y + 9);
+
+    y += ieHeight + 3;
+
+    // =========================================================================
+    // 4. DESTINATÁRIO / REMETENTE
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('DESTINATÁRIO / REMETENTE', left, y);
+    y += 7;
+
+    const destRow1 = 18;
+    doc.rect(left, y, 360, destRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('NOME / RAZÃO SOCIAL', left + 3, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.destinatario.razaoSocial.toUpperCase(), left + 3, y + 8, { width: 354, ellipsis: true });
+
+    doc.rect(left + 360, y, 120, destRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('CNPJ / CPF', left + 363, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(formatCNPJ(invoice.destinatario.cnpjCpf), left + 363, y + 8);
+
+    doc.rect(left + 480, y, width - 480, destRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('DATA DA EMISSÃO', left + 483, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(formatDateOnly(invoice.dataEmissao), left + 483, y + 8);
+
+    y += destRow1;
+
+    const destRow2 = 18;
+    doc.rect(left, y, 260, destRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('ENDEREÇO', left + 3, y + 2);
+    const destAddr = `${invoice.destinatario.logradouro || ''}, ${invoice.destinatario.numero || 'S/N'}`;
+    doc.fontSize(6).font('Helvetica-Bold').text(destAddr, left + 3, y + 8, { width: 254, ellipsis: true });
+
+    doc.rect(left + 260, y, 130, destRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('BAIRRO / DISTRITO', left + 263, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.bairro || '', left + 263, y + 8, { width: 124, ellipsis: true });
+
+    doc.rect(left + 390, y, 90, destRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('CEP', left + 393, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.cep || '', left + 393, y + 8);
+
+    doc.rect(left + 480, y, width - 480, destRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('DATA SAÍDA / ENTRADA', left + 483, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(formatDateOnly(invoice.dataSaidaEntrada || invoice.dataEmissao), left + 483, y + 8);
+
+    y += destRow2;
+
+    const destRow3 = 18;
+    doc.rect(left, y, 200, destRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('MUNICÍPIO', left + 3, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.municipio || '', left + 3, y + 8);
+
+    doc.rect(left + 200, y, 90, destRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('FONE / FAX', left + 203, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.fone || '', left + 203, y + 8);
+
+    doc.rect(left + 290, y, 30, destRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('UF', left + 293, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.destinatario.uf || '', left + 293, y + 8);
+
+    doc.rect(left + 320, y, 160, destRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('INSCRIÇÃO ESTADUAL', left + 323, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.ie || 'ISENTO', left + 323, y + 8);
+
+    doc.rect(left + 480, y, width - 480, destRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('HORA DA SAÍDA', left + 483, y + 2);
+    doc.fontSize(6.5).font('Helvetica-Bold').text('00:00:00', left + 483, y + 8);
+
+    y += destRow3 + 3;
+
+    // =========================================================================
+    // 5. CÁLCULO DO IMPOSTO
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('CÁLCULO DO IMPOSTO', left, y);
+    y += 7;
+
+    const impWidth = width / 6;
+    const impRow1 = 18;
     
-    // Grid of totals
-    const yTotal = 220;
-    doc.fontSize(6).font('Helvetica').fillColor('#475569');
-    doc.text('BASE CÁLC. ICMS', 25, yTotal);
-    doc.text('VALOR DO ICMS', 110, yTotal);
-    doc.text('BASE ICMS ST', 200, yTotal);
-    doc.text('VALOR ICMS ST', 290, yTotal);
-    doc.text('VALOR TOTAL PROD.', 380, yTotal);
-    doc.text('VALOR TOTAL DA NOTA', 470, yTotal);
+    doc.rect(left, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('BASE DE CÁLCULO DO ICMS', left + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.baseCalculoIcms), left + 2, y + 8, { align: 'right', width: impWidth - 4 });
 
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a');
-    doc.text(formatCurrency(invoice.totais.baseCalculoIcms), 25, yTotal + 10);
-    doc.text(formatCurrency(invoice.totais.valorIcms), 110, yTotal + 10);
-    doc.text(formatCurrency(invoice.totais.baseCalculoIcmsSt), 200, yTotal + 10);
-    doc.text(formatCurrency(invoice.totais.valorIcmsSt), 290, yTotal + 10);
-    doc.text(formatCurrency(invoice.totais.valorProdutos), 380, yTotal + 10);
-    doc.fillColor('#0369a1').text(formatCurrency(invoice.totais.valorTotal), 470, yTotal + 10);
+    doc.rect(left + impWidth, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR DO ICMS', left + impWidth + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorIcms), left + impWidth + 2, y + 8, { align: 'right', width: impWidth - 4 });
 
-    // Itens da Nota Table
-    doc.rect(20, 255, 555, 18).fillAndStroke('#f1f5f9', '#334155');
-    doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#0f172a');
-    doc.text('CÓDIGO', 25, 260);
-    doc.text('DESCRIÇÃO DO PRODUTO / SERVIÇO', 80, 260);
-    doc.text('NCM', 250, 260);
-    doc.text('CFOP', 290, 260);
-    doc.text('UN', 325, 260);
-    doc.text('QTD', 345, 260);
-    doc.text('V. UNIT', 385, 260);
-    doc.text('V. TOTAL', 440, 260);
-    doc.text('BC ICMS', 495, 260);
-    doc.text('ICMS', 545, 260);
+    doc.rect(left + impWidth * 2, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('BASE DE CÁLC. ICMS S.T.', left + impWidth * 2 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.baseCalculoIcmsSt), left + impWidth * 2 + 2, y + 8, { align: 'right', width: impWidth - 4 });
 
-    let currentY = 278;
+    doc.rect(left + impWidth * 3, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR DO ICMS S.T.', left + impWidth * 3 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorIcmsSt), left + impWidth * 3 + 2, y + 8, { align: 'right', width: impWidth - 4 });
+
+    doc.rect(left + impWidth * 4, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR TOTAL DOS PRODUTOS', left + impWidth * 4 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorProdutos), left + impWidth * 4 + 2, y + 8, { align: 'right', width: impWidth - 4 });
+
+    doc.rect(left + impWidth * 5, y, impWidth, impRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica-Bold').text('VALOR TOTAL DA NOTA', left + impWidth * 5 + 2, y + 2);
+    doc.fontSize(7).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorTotal), left + impWidth * 5 + 2, y + 7, { align: 'right', width: impWidth - 4 });
+
+    y += impRow1;
+
+    // Row 2
+    const impRow2 = 18;
+    const imp2Width = width / 5;
+
+    doc.rect(left, y, imp2Width, impRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR DO FRETE', left + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorFrete), left + 2, y + 8, { align: 'right', width: imp2Width - 4 });
+
+    doc.rect(left + imp2Width, y, imp2Width, impRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR DO SEGURO', left + imp2Width + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorSeguro), left + imp2Width + 2, y + 8, { align: 'right', width: imp2Width - 4 });
+
+    doc.rect(left + imp2Width * 2, y, imp2Width, impRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('DESCONTO', left + imp2Width * 2 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorDesconto), left + imp2Width * 2 + 2, y + 8, { align: 'right', width: imp2Width - 4 });
+
+    doc.rect(left + imp2Width * 3, y, imp2Width, impRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('OUTRAS DESPESAS ACESS.', left + imp2Width * 3 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorOutrasDespesas), left + imp2Width * 3 + 2, y + 8, { align: 'right', width: imp2Width - 4 });
+
+    doc.rect(left + imp2Width * 4, y, imp2Width, impRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('VALOR DO IPI', left + imp2Width * 4 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCurrency(invoice.totais.valorIpi), left + imp2Width * 4 + 2, y + 8, { align: 'right', width: imp2Width - 4 });
+
+    y += impRow2 + 3;
+
+    // =========================================================================
+    // 6. FATURA / DUPLICATAS (PARCELAS FINANCEIRAS)
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('FATURA / DUPLICATA', left, y);
+    y += 7;
+
+    const dupList = invoice.duplicatas || [];
+    if (dupList.length > 0) {
+      const dupBoxWidth = Math.min(width / Math.min(dupList.length, 6), 94);
+      const dupBoxHeight = 22;
+
+      let curDupX = left;
+      let dupRowCount = 0;
+
+      for (let d = 0; d < dupList.length; d++) {
+        const dup = dupList[d];
+        if (curDupX + dupBoxWidth > left + width + 1) {
+          curDupX = left;
+          y += dupBoxHeight;
+          dupRowCount++;
+          if (dupRowCount > 2) break; // Limit rows
+        }
+
+        doc.rect(curDupX, y, dupBoxWidth, dupBoxHeight).stroke('#000000');
+        doc.fontSize(4).font('Helvetica').text(`Nº ${dup.numero}`, curDupX + 2, y + 2);
+        doc.fontSize(4.5).font('Helvetica').text(`VENC: ${formatDateOnly(dup.vencimento)}`, curDupX + 2, y + 8);
+        doc.fontSize(5.5).font('Helvetica-Bold').text(`R$ ${formatCurrency(dup.valor)}`, curDupX + 2, y + 14, { align: 'right', width: dupBoxWidth - 4 });
+
+        curDupX += dupBoxWidth;
+      }
+      y += dupBoxHeight + 3;
+    } else if (invoice.fatura) {
+      doc.rect(left, y, width, 18).stroke('#000000');
+      doc.fontSize(4.5).font('Helvetica').text(`NÚMERO: ${invoice.fatura.numero || invoice.numero} | VALOR ORIGINAL: R$ ${formatCurrency(invoice.fatura.valorOriginal || invoice.totais.valorTotal)} | DESCONTO: R$ ${formatCurrency(invoice.fatura.valorDesconto || 0)} | VALOR LÍQUIDO: R$ ${formatCurrency(invoice.fatura.valorLiquido || invoice.totais.valorTotal)}`, left + 4, y + 6);
+      y += 21;
+    } else {
+      doc.rect(left, y, width, 14).stroke('#000000');
+      doc.fontSize(5).font('Helvetica').text('PAGAMENTO À VISTA / SEM COBRANÇA DIRETA', left + 4, y + 4);
+      y += 17;
+    }
+
+    // =========================================================================
+    // 7. TRANSPORTADOR / VOLUMES TRANSPORTADOS
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('TRANSPORTADOR / VOLUMES TRANSPORTADOS', left, y);
+    y += 7;
+
+    const transp = invoice.transporte || {
+      modalidadeFrete: '9 - Sem Ocorrência de Transporte',
+      modalidadeCodigo: '9'
+    };
+    const transpRow1 = 18;
+
+    // Row 1
+    doc.rect(left, y, 190, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('RAZÃO SOCIAL', left + 3, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text((transp.transportadora?.razaoSocial || '').toUpperCase(), left + 3, y + 8, { width: 184, ellipsis: true });
+
+    doc.rect(left + 190, y, 110, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('FRETE POR CONTA', left + 193, y + 2);
+    doc.fontSize(5.5).font('Helvetica-Bold').text(transp.modalidadeFrete || '9 - Sem Frete', left + 193, y + 8, { width: 104, ellipsis: true });
+
+    doc.rect(left + 300, y, 60, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('CÓDIGO ANTT', left + 303, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.veiculo?.rntc || '', left + 303, y + 8);
+
+    doc.rect(left + 360, y, 60, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('PLACA DO VEÍC.', left + 363, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.veiculo?.placa || '', left + 363, y + 8);
+
+    doc.rect(left + 420, y, 30, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('UF', left + 423, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.veiculo?.uf || '', left + 423, y + 8);
+
+    doc.rect(left + 450, y, width - 450, transpRow1).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('CNPJ / CPF', left + 453, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(formatCNPJ(transp.transportadora?.cnpjCpf || ''), left + 453, y + 8);
+
+    y += transpRow1;
+
+    // Row 2
+    const transpRow2 = 18;
+    doc.rect(left, y, 240, transpRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('ENDEREÇO', left + 3, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.transportadora?.endereco || '', left + 3, y + 8, { width: 234, ellipsis: true });
+
+    doc.rect(left + 240, y, 180, transpRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('MUNICÍPIO', left + 243, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.transportadora?.municipio || '', left + 243, y + 8);
+
+    doc.rect(left + 420, y, 30, transpRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('UF', left + 423, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.transportadora?.uf || '', left + 423, y + 8);
+
+    doc.rect(left + 450, y, width - 450, transpRow2).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('INSCRIÇÃO ESTADUAL', left + 453, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(transp.transportadora?.ie || '', left + 453, y + 8);
+
+    y += transpRow2;
+
+    // Row 3 (Volumes)
+    const transpRow3 = 18;
+    const vol = transp.volumes || {};
+    const volColW = width / 6;
+
+    doc.rect(left, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('QUANTIDADE', left + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.quantidade ? String(vol.quantidade) : '', left + 2, y + 8);
+
+    doc.rect(left + volColW, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('ESPÉCIE', left + volColW + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.especie || '', left + volColW + 2, y + 8);
+
+    doc.rect(left + volColW * 2, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('MARCA', left + volColW * 2 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.marca || '', left + volColW * 2 + 2, y + 8);
+
+    doc.rect(left + volColW * 3, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('NUMERAÇÃO', left + volColW * 3 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.numeracao || '', left + volColW * 3 + 2, y + 8);
+
+    doc.rect(left + volColW * 4, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('PESO BRUTO', left + volColW * 4 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.pesoBruto ? `${Number(vol.pesoBruto).toFixed(3)} kg` : '', left + volColW * 4 + 2, y + 8);
+
+    doc.rect(left + volColW * 5, y, volColW, transpRow3).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica').text('PESO LÍQUIDO', left + volColW * 5 + 2, y + 2);
+    doc.fontSize(6).font('Helvetica-Bold').text(vol.pesoLiquido ? `${Number(vol.pesoLiquido).toFixed(3)} kg` : '', left + volColW * 5 + 2, y + 8);
+
+    y += transpRow3 + 3;
+
+    // =========================================================================
+    // 8. DADOS DOS PRODUTOS / SERVIÇOS
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVIÇOS', left, y);
+    y += 7;
+
+    // Table Header
+    const colW = {
+      cod: 40,
+      desc: 180,
+      ncm: 45,
+      cst: 25,
+      cfop: 25,
+      un: 20,
+      qtd: 35,
+      vunit: 45,
+      vtotal: 45,
+      bcicms: 45,
+      vicms: 35,
+      aliq: 25
+    };
+
+    doc.rect(left, y, width, 12).fillAndStroke('#f8fafc', '#000000');
+    doc.fontSize(4.5).font('Helvetica-Bold').fillColor('#000000');
+    
+    let curX = left + 2;
+    doc.text('CÓDIGO', curX, y + 3, { width: colW.cod });
+    curX += colW.cod;
+    doc.text('DESCRIÇÃO DO PRODUTO / SERVIÇO', curX, y + 3, { width: colW.desc });
+    curX += colW.desc;
+    doc.text('NCM/SH', curX, y + 3, { width: colW.ncm });
+    curX += colW.ncm;
+    doc.text('CST', curX, y + 3, { width: colW.cst });
+    curX += colW.cst;
+    doc.text('CFOP', curX, y + 3, { width: colW.cfop });
+    curX += colW.cfop;
+    doc.text('UN', curX, y + 3, { width: colW.un });
+    curX += colW.un;
+    doc.text('QTD.', curX, y + 3, { width: colW.qtd, align: 'right' });
+    curX += colW.qtd;
+    doc.text('V. UNIT.', curX, y + 3, { width: colW.vunit, align: 'right' });
+    curX += colW.vunit;
+    doc.text('V. TOTAL', curX, y + 3, { width: colW.vtotal, align: 'right' });
+    curX += colW.vtotal;
+    doc.text('BC ICMS', curX, y + 3, { width: colW.bcicms, align: 'right' });
+    curX += colW.bcicms;
+    doc.text('V. ICMS', curX, y + 3, { width: colW.vicms, align: 'right' });
+    curX += colW.vicms;
+    doc.text('ALÍQ.', curX, y + 3, { width: colW.aliq, align: 'right' });
+
+    y += 12;
+
+    // Items List
     const maxItems = Math.min(invoice.itens.length, 12);
+    const itemHeight = 11;
 
     for (let i = 0; i < maxItems; i++) {
       const it = invoice.itens[i];
-      doc.rect(20, currentY - 3, 555, 16).stroke('#e2e8f0');
-      doc.fontSize(6.5).font('Helvetica').fillColor('#334155');
-      doc.text(it.codigo.substring(0, 8), 25, currentY);
-      doc.text(it.descricao.substring(0, 38), 80, currentY, { width: 165, ellipsis: true });
-      doc.text(it.ncm, 250, currentY);
-      doc.text(it.cfop, 290, currentY);
-      doc.text(it.unidade, 325, currentY);
-      doc.text(String(it.quantidade), 345, currentY);
-      doc.text(formatCurrency(it.valorUnitario), 385, currentY);
-      doc.font('Helvetica-Bold').fillColor('#0f172a').text(formatCurrency(it.valorTotal), 440, currentY);
-      doc.font('Helvetica').fillColor('#334155').text(formatCurrency(it.icms?.baseCalculo), 495, currentY);
-      doc.text(formatCurrency(it.icms?.valor), 545, currentY);
+      doc.rect(left, y, width, itemHeight).stroke('#cbd5e1');
+      doc.fontSize(5).font('Helvetica').fillColor('#000000');
 
-      currentY += 16;
+      let itemX = left + 2;
+      doc.text(it.codigo.substring(0, 10), itemX, y + 2, { width: colW.cod });
+      itemX += colW.cod;
+      doc.text(it.descricao.substring(0, 52), itemX, y + 2, { width: colW.desc, ellipsis: true });
+      itemX += colW.desc;
+      doc.text(it.ncm || '', itemX, y + 2, { width: colW.ncm });
+      itemX += colW.ncm;
+      doc.text(it.icms?.cst || (it as any).cst || '000', itemX, y + 2, { width: colW.cst });
+      itemX += colW.cst;
+      doc.text(it.cfop || '', itemX, y + 2, { width: colW.cfop });
+      itemX += colW.cfop;
+      doc.text(it.unidade || 'UN', itemX, y + 2, { width: colW.un });
+      itemX += colW.un;
+      doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, y + 2, { width: colW.qtd, align: 'right' });
+      itemX += colW.qtd;
+      doc.text(formatCurrency(it.valorUnitario), itemX, y + 2, { width: colW.vunit, align: 'right' });
+      itemX += colW.vunit;
+      doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, y + 2, { width: colW.vtotal, align: 'right' });
+      itemX += colW.vtotal;
+      doc.font('Helvetica').text(formatCurrency(it.icms?.baseCalculo), itemX, y + 2, { width: colW.bcicms, align: 'right' });
+      itemX += colW.bcicms;
+      doc.text(formatCurrency(it.icms?.valor), itemX, y + 2, { width: colW.vicms, align: 'right' });
+      itemX += colW.vicms;
+      doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, y + 2, { width: colW.aliq, align: 'right' });
+
+      y += itemHeight;
     }
 
-    if (invoice.itens.length > maxItems) {
-      doc.fontSize(6.5).font('Helvetica-Oblique').fillColor('#64748b');
-      doc.text(`... e mais ${invoice.itens.length - maxItems} itens detalhados no XML.`, 25, currentY + 4);
-      currentY += 16;
+    y += 5;
+
+    // =========================================================================
+    // 9. DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES
+    // =========================================================================
+    doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS ADICIONAIS', left, y);
+    y += 7;
+
+    const addHeight = Math.max(50, 780 - y);
+    doc.rect(left, y, 380, addHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica-Bold').text('INFORMAÇÕES COMPLEMENTARES', left + 3, y + 2);
+    
+    const obsText = invoice.informacoesComplementares || 'Documento emitido por ME ou EPP optante pelo Simples Nacional ou Regime Normal. Permite o aproveitamento do crédito de ICMS correspondente na forma da lei.';
+    doc.fontSize(5).font('Helvetica').text(
+      obsText,
+      left + 3,
+      y + 10,
+      { width: 374, height: addHeight - 12 }
+    );
+
+    doc.rect(left + 380, y, width - 380, addHeight).stroke('#000000');
+    doc.fontSize(4.5).font('Helvetica-Bold').text('RESERVADO AO FISCO', left + 383, y + 2);
+    if (invoice.informacoesFisco) {
+      doc.fontSize(5).font('Helvetica').text(invoice.informacoesFisco, left + 383, y + 10, { width: width - 386, height: addHeight - 12 });
     }
-
-    // Informações Complementares
-    const infoY = Math.max(currentY + 15, 660);
-    doc.rect(20, infoY, 555, 130).stroke('#334155');
-    doc.fontSize(7).font('Helvetica-Bold').fillColor('#0f172a').text('DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES', 25, infoY + 5);
-    doc.fontSize(6.5).font('Helvetica').fillColor('#475569');
-    doc.text(
-      invoice.informacoesComplementares || 'Documento emitido por ME ou EPP optante pelo Simples Nacional ou Regime Normal. Autenticidade garantida por assinatura digital SEFAZ.',
-      25,
-      infoY + 18,
-      { width: 545, height: 105, ellipsis: true }
-    );
-
-    // Footer
-    doc.fontSize(6).font('Helvetica').fillColor('#94a3b8').text(
-      `DF-e Hub Contabilidade | Gerado em ${new Date().toLocaleString('pt-BR')} | Documento Oficial de Consulta`,
-      20,
-      805,
-      { align: 'center', width: 555 }
-    );
 
     doc.end();
 

@@ -1,108 +1,83 @@
-# 📄 DF-e Hub | Gestão Fiscal & Backup Automático no Google Drive
+﻿# 🚀 ViaNfe | Super App Viacont — Ecossistema Fiscal, BPO Financeiro & PWA Mobile
 
-Sistema completo e profissional desenvolvido para **escritórios de contabilidade** gerenciarem o download, visualização, armazenamento e backup automatizado de notas fiscais (**NF-e, NFC-e, CT-e**) de todas as suas empresas clientes.
+> **Plataforma Enterprise de Gestão Fiscal, Inteligência Tributária, Conciliação Bancária com Open Finance e Área do Cliente PWA Mobile-First desenvolvida para a Viacont e seus clientes.**
 
----
-
-## 🚀 Principais Funcionalidades
-
-### 1. 🏢 Gestão de Empresas Clientes & Isolamento Total (Multi-Tenant)
-- **Segurança e Isolamento Rígido**: As consultas e telas filtram estritamente por empresa (`company_id`). Dados de clientes diferentes **nunca se misturam**.
-- **Sem Dados Fictícios**: Apenas notas fiscais reais importadas ou sincronizadas são exibidas.
-- **Consulta Automática de CNPJ**: Integração com a base pública da Receita Federal (BrasilAPI) para auto-preenchimento instantâneo da Razão Social, Nome Fantasia, UF, Município e Endereço.
-- **Certificado Digital A1**: Upload seguro de certificados `.pfx` / `.p12` com criptografia de ponta a ponta (AES-256) em repouso.
-
-### 2. 📊 Dashboard de Notas Fiscais com Filtros de Período
-- **Seletor de Empresa Ativa**: Alterne com um clique entre clientes no topo da tela.
-- **Filtros Rápidos de Data**:
-  - `Últimos 7 dias`
-  - `Últimos 15 dias`
-  - `Últimos 30 dias`
-  - `Personalizado` (Seleção de Data Inicial e Data Final via calendário).
-- **Filtros por Tipo & Status**:
-  - Entradas (Compras / Notas Recebidas de Fornecedores)
-  - Saídas (Vendas / Notas Emitidas pelo Cliente)
-  - Autorizadas / Canceladas
-- **Busca Rápida**: Por Chave de Acesso (44 dígitos), Razão Social ou Número da Nota.
-
-### 3. 📥 Ações por Nota Fiscal (Downloads & Detalhes)
-- Ao lado de cada nota fiscal na tabela:
-  - 📥 **Baixar XML**: Download direto do arquivo `.xml` oficial assinado.
-  - 📄 **Baixar PDF**: Download do **DANFE** oficial formatado em PDF.
-  - ☁️ **Enviar ao Drive**: Sincronização imediata e individual para a pasta do cliente.
-  - 👁️ **Visualizar Detalhes**: Modal detalhado com itens, NCM, CFOP, quantidades e cálculo de impostos (ICMS, PIS, COFINS, IPI).
-- **Ações em Lote**:
-  - `Baixar Lote XML (.ZIP)`: Compacta todos os XMLs filtrados em um único arquivo ZIP.
-  - `Baixar Lote PDF (.ZIP)`: Compacta todos os DANFEs PDF em um único arquivo ZIP.
-
-### 4. ☁️ Sincronização & Agendamento Automático para o Google Drive
-- **Organização Inteligente em Pastas**:
-  ```
-  📁 Google Drive
-  └── 📁 Contabilidade / [Nome_da_Empresa_Cliente]
-      └── 📁 2026 (Ano)
-          └── 📁 08 (Mês)
-              ├── 📁 XMLs (arquivos .xml originais)
-              └── 📁 PDFs (DANFEs oficiais em PDF)
-  ```
-- **Agendador em Segundo Plano (Worker Cron)**: Sincronização programada com frequências configuráveis (Diária, a cada 6h, a cada 1h ou manual).
-- **Histórico & Logs de Auditoria**: Registro detalhado com status de envio, quantidade de notas e mensagens de sucesso ou erro.
-
-### 5. 📥 Importador de Lotes XML
-- Área de arrastar e soltar (Drag & Drop) para importar notas fiscais históricas ou recebidas por e-mail em formato `.xml`, gerando automaticamente os DANFEs e gravando no banco da empresa selecionada.
+[![Production](https://img.shields.io/badge/Status-100%25%20Em%20Produção-059669?style=for-the-badge)](https://vianfe.contadordev.com.br)
+[![PWA](https://img.shields.io/badge/Mobile-PWA%20Ready-0284c7?style=for-the-badge)](https://vianfe.contadordev.com.br)
+[![SSL](https://img.shields.io/badge/Security-Let%27s%20Encrypt%20SSL-10b981?style=for-the-badge)](https://vianfe.contadordev.com.br)
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
-
-- **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, Lucide Icons, Canvas Confetti.
-- **Backend**: Node.js, Express, TypeScript, `node:sqlite` (SQLite Nativo de Alta Performance), Fast XML Parser, PDFKit, Google APIs Client (`googleapis`), Archiver.
+## 🌐 Acesso em Produção (Oracle Cloud VPS)
+- **Super App & Painel Principal**: [https://vianfe.contadordev.com.br](https://vianfe.contadordev.com.br)
+- **Nginx Proxy Manager**: [https://painel.contadordev.com.br](https://painel.contadordev.com.br)
+- **Motor de Automações n8n**: [https://n8n.contadordev.com.br](https://n8n.contadordev.com.br)
+- **Relay SEFAZ mTLS**: [https://sefaz-relay.contadordev.com.br](https://sefaz-relay.contadordev.com.br)
 
 ---
 
-## 📦 Como Instalar e Rodar Localmente
+## 📱 Principais Módulos do Sistema
 
-### 1. Pré-requisitos
-- Node.js instalado (v18, v20 ou v22+)
+### 1. 📱 Super App Viacont (PWA Mobile & Desktop)
+- **Instalação Nativa em 1-Clique**: Suporte a Progressive Web App (PWA) para Android (Chrome) e iOS (Safari).
+- **Atalhos Rápidos (App Shortcuts)**:
+  - ⚡ *Emitir Nota Fiscal Relâmpago (NFS-e & NF-e em 3 passos)*
+  - 💳 *Pagar Impostos PIX (DAS, ICMS, FGTS com Copia-e-Cola)*
+  - 📷 *Scanner OCR de Recibos & Cupons com Câmera*
+  - ⏱️ *Radar de Caixa 48h com Previsões Financeiras*
 
-### 2. Instalação das Dependências
-Na raiz do projeto:
-```powershell
-npm.cmd install
-cd server ; npm.cmd install ; cd ..
-cd client ; npm.cmd install ; cd ..
-```
+### 2. 🏦 BPO Financeiro & Conciliação Bancária Lado a Lado
+- **Open Finance Plug & Play**: Webhook dedicado por empresa para ingestão de extratos bancários em tempo real (Inter PJ, Cora, Asaas, Nubank PJ, Itaú, Bradesco, Santander).
+- **Importador de Extratos OFX & PDF**: Leitura e parsing automático de extratos bancários com inteligência anti-duplicação.
+- **Auto-Match Inteligente**: Cruzamento automático com notas fiscais de entrada e parcelas de contas a pagar.
 
-### 3. Iniciar o Sistema (Backend + Frontend)
-Execute o comando unificado:
-```powershell
+### 3. 📑 Mapeador & Exportador Domínio Sistemas
+- **Auto-Mapeamento Contábil**: Vinculação automática de categorias financeiras com o plano de contas contábil da Domínio Sistemas.
+- **Exportador Oficial em Arquivo TXT**: Geração de arquivo de lançamentos contábeis no layout oficial da Domínio Sistemas para importação instantânea.
+
+### 4. 📲 Radar de Alertas Preditivos no WhatsApp (48h)
+- **Varredura Preditiva**: Identificação de contas a pagar e guias tributárias a vencer em até 48 horas.
+- **Assistente Viviane**: Geração e disparo matinal diário às **09:30 AM BRT** de mensagens personalizadas no WhatsApp com código PIX e resumo das guias.
+
+### 5. 📊 Painel de Sucesso Empresarial & DRE em Tempo Real
+- **+30 KPIs Estratégicos**: Margem Bruta, Margem EBITDA, Margem Líquida, Ponto de Equilíbrio, PMR, PMP e Giro de Estoque.
+- **Radar de Risco Fiscal**: Cruzamento de vendas em cartões/PIX contra faturamento emitido em notas fiscais.
+- **Exportação Timbrada**: Botão para impressão e geração de relatório executivo em PDF formato A4.
+
+### 6. 🤖 Robô Autônomo SEFAZ & Sincronização Google Drive 24/7
+- **Janela Noturna Estrita (01:00 às 03:00 BRT)**: Varreduras automáticas na SEFAZ Nacional para captura de NF-e e manifestação do destinatário.
+- **Backup no Google Drive**: Sincronização periódica a cada 30 minutos em estrutura organizada de pastas por Ano e Mês.
+
+---
+
+## 🛠️ Stack Tecnológica
+
+| Camada | Tecnologias |
+| :--- | :--- |
+| **Frontend** | React 18, TypeScript, Vite v6, Tailwind CSS, Lucide Icons, Canvas Confetti |
+| **PWA** | Service Worker (sw.js), Web App Manifest, Cache First Offline |
+| **Backend** | Node.js 22, Express, TypeScript, SQLite Nativo (WAL mode), node-cron |
+| **Fiscal / DF-e** | Fast-XML-Parser, PDFKit (DANFE/DANFSE), Gotenberg PDF Engine |
+| **Infraestrutura** | Oracle Cloud OCI, Docker Compose, Nginx Proxy Manager, SSL Let's Encrypt |
+
+---
+
+## 📦 Execução Local
+
+`ash
+# Instalação
+npm install
+npm install --prefix server
+npm install --prefix client
+
+# Execução Integrada
 npm run dev
-```
+`
 
-- **Frontend (Painel Web)**: [http://localhost:5173](http://localhost:5173)
-- **Backend (API REST)**: [http://localhost:3001](http://localhost:3001)
-
----
-
-## 🐙 Como Conectar com o seu GitHub
-
-Para enviar este projeto para o seu repositório no GitHub:
-
-1. Crie um novo repositório vazio no seu [GitHub](https://github.com/new) (ex: `app-xml-fiscal-drive`).
-2. No terminal da pasta do projeto, execute os comandos:
-
-```powershell
-git init
-git add .
-git commit -m "feat: Sistema de Gestão e Download Automático de XML/PDF Fiscal e Google Drive"
-git branch -M main
-git remote add origin https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
-git push -u origin main
-```
+- **Frontend**: http://localhost:5173
+- **Backend**: http://localhost:3001
 
 ---
 
-## 🔒 Segurança e Privacidade
-
-- Os Certificados Digitais A1 e suas respectivas senhas são armazenados com criptografia **AES-256-CBC**.
-- Todo o tráfego de dados é validado por `company_id`, impedindo o vazamento de informações entre empresas clientes.
+## 📄 Licença
+Propriedade exclusiva do ecossistema **Viacont Contabilidade Inteligente & ViaNfe**. Todos os direitos reservados.

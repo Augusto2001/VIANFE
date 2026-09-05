@@ -15,7 +15,8 @@ import {
   Coins,
   ShieldCheck,
   Calendar,
-  Layers
+  Layers,
+  CreditCard
 } from 'lucide-react';
 
 interface InvoiceDetailModalProps {
@@ -30,7 +31,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   onSyncDrive,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'geral' | 'itens' | 'tributos'>('geral');
+  const [activeTab, setActiveTab] = useState<'geral' | 'itens' | 'tributos' | 'cobranca'>('geral');
 
   if (!invoice) return null;
 
@@ -157,6 +158,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             }`}
           >
             Totais & Impostos Fiscais
+          </button>
+          <button
+            onClick={() => setActiveTab('cobranca')}
+            className={`pb-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'cobranca' 
+                ? 'border-brand-500 text-brand-400' 
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cobrança & Duplicatas</span>
+            {(invoice.duplicatas?.length || 0) > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-bold">
+                {invoice.duplicatas?.length}x
+              </span>
+            )}
           </button>
         </div>
 
@@ -328,6 +345,91 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'cobranca' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Fatura Resumo */}
+              {invoice.fatura && (
+                <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs uppercase tracking-wider">
+                    <Receipt className="w-4 h-4" />
+                    <span>Dados da Fatura Nº {invoice.fatura.numero || invoice.numero}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+                      <span className="text-[11px] text-slate-400 block">Valor Original</span>
+                      <span className="text-sm font-bold text-white font-mono">{formatCurrency(invoice.fatura.valorOriginal || invoice.valor_total)}</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+                      <span className="text-[11px] text-slate-400 block">Valor Desconto</span>
+                      <span className="text-sm font-bold text-rose-400 font-mono">{formatCurrency(invoice.fatura.valorDesconto || 0)}</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+                      <span className="text-[11px] text-slate-400 block">Valor Líquido a Pagar</span>
+                      <span className="text-sm font-bold text-emerald-400 font-mono">{formatCurrency(invoice.fatura.valorLiquido || invoice.valor_total)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabela de Duplicatas / Parcelas */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-cyan-400" />
+                    <span>Duplicatas & Vencimentos Registrados ({invoice.duplicatas?.length || 1} parcelas)</span>
+                  </h4>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                    {invoice.tipo === 'entrada' ? 'Contas a Pagar' : 'Contas a Receber'}
+                  </span>
+                </div>
+
+                <div className="border border-slate-800 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-800/70 text-slate-400 font-semibold border-b border-slate-800">
+                      <tr>
+                        <th className="py-2.5 px-3">Parcela</th>
+                        <th className="py-2.5 px-3">Favorecido / Fornecedor</th>
+                        <th className="py-2.5 px-3">Data de Vencimento</th>
+                        <th className="py-2.5 px-3 text-right">Valor da Parcela</th>
+                        <th className="py-2.5 px-3 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {(!invoice.duplicatas || invoice.duplicatas.length === 0) ? (
+                        <tr className="hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3 font-mono text-cyan-400 font-bold">001 (À Vista / Parcela Única)</td>
+                          <td className="py-2.5 px-3 text-white">{invoice.emitente_nome}</td>
+                          <td className="py-2.5 px-3 text-slate-300 font-mono">{formatDate(invoice.data_saida_entrada || invoice.data_emissao)}</td>
+                          <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold text-right">{formatCurrency(invoice.valor_total)}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                              Lançada em Contas a Pagar
+                            </span>
+                          </td>
+                        </tr>
+                      ) : (
+                        invoice.duplicatas.map((dup, idx) => (
+                          <tr key={idx} className="hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3 font-mono text-cyan-400 font-bold">Parcela {dup.numero || String(idx + 1).padStart(3, '0')}</td>
+                            <td className="py-2.5 px-3 text-white max-w-xs truncate">{invoice.emitente_nome}</td>
+                            <td className="py-2.5 px-3 text-slate-300 font-mono font-medium">{dup.vencimento ? dup.vencimento.split('-').reverse().join('/') : formatDate(invoice.data_emissao)}</td>
+                            <td className="py-2.5 px-3 text-emerald-400 font-mono font-bold text-right">{formatCurrency(dup.valor)}</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                Lançada em Contas a Pagar
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           )}
 

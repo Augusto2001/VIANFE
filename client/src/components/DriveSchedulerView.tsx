@@ -18,7 +18,6 @@ import {
   Sparkles,
   ArrowRight
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 interface DriveSchedulerViewProps {
   companies: Company[];
