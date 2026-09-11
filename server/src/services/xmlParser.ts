@@ -522,7 +522,7 @@ function parseResNFe(resNFe: any): ParsedFiscalInvoice {
     itens: [],
     duplicatas: [],
     pagamentos: [],
-    protocoloAutorizacao: resNFe.dhRecbto ? String(resNFe.dhRecbto) : undefined,
+    protocoloAutorizacao: resNFe.nProt ? String(resNFe.nProt) : undefined,
     dataAutorizacao: resNFe.dhRecbto ? String(resNFe.dhRecbto) : undefined,
     informacoesComplementares: 'Resumo de NF-e obtido via SEFAZ Nacional (Aguardando manifestação / XML completo).',
   };
@@ -575,7 +575,7 @@ function parseResCTe(resCTe: any): ParsedFiscalInvoice {
     itens: [],
     duplicatas: [],
     pagamentos: [],
-    protocoloAutorizacao: resCTe.dhRecbto ? String(resCTe.dhRecbto) : undefined,
+    protocoloAutorizacao: resCTe.nProt ? String(resCTe.nProt) : undefined,
     dataAutorizacao: resCTe.dhRecbto ? String(resCTe.dhRecbto) : undefined,
     informacoesComplementares: 'Resumo de CT-e obtido via SEFAZ Nacional (Aguardando manifestação / XML completo).',
   };

@@ -28,6 +28,16 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
       return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    const formatUnitPrice = (val?: number) => {
+      if (val === undefined || val === null || isNaN(val)) return '0,00';
+      return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    };
+
+    const formatAliq = (val?: number) => {
+      if (val === undefined || val === null || isNaN(val)) return '0%';
+      return `${Number(val).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`;
+    };
+
     const formatDateOnly = (dateStr?: string) => {
       if (!dateStr) return '';
       try {
@@ -40,6 +50,20 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         return d.toLocaleDateString('pt-BR');
       } catch {
         return dateStr;
+      }
+    };
+
+    const formatTimeOnly = (dateStr?: string) => {
+      if (!dateStr) return '';
+      try {
+        if (dateStr.includes('T')) {
+          const timePart = dateStr.split('T')[1];
+          return timePart.substring(0, 8);
+        }
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString('pt-BR');
+      } catch {
+        return '';
       }
     };
 
@@ -57,13 +81,21 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     const width = 565;
     let y = 15;
 
-    // Multi-page DANFE parameters
+    // Multi-page DANFE parameters: High-density, professional layout
     const items = invoice.itens || [];
-    const itemsOnPage1 = 8;
-    const itemsOnFollowPage = 28;
-    const remainingItems = Math.max(0, items.length - itemsOnPage1);
-    const followPages = Math.ceil(remainingItems / itemsOnFollowPage);
-    const totalPages = Math.max(1, 1 + followPages);
+    let totalPages = 1;
+    let itemsOnPage1 = 20;
+    const itemsOnFollowPage = 36;
+
+    if (items.length <= 20) {
+      totalPages = 1;
+      itemsOnPage1 = Math.max(items.length, 1);
+    } else {
+      itemsOnPage1 = 16;
+      const remainingItems = items.length - itemsOnPage1;
+      const followPages = Math.ceil(remainingItems / itemsOnFollowPage);
+      totalPages = 1 + followPages;
+    }
 
     // =========================================================================
     // 1. CANHOTO DE RECEBIMENTO (Padrão Nacional SEFAZ)
@@ -249,7 +281,8 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
 
     doc.rect(left + 480, y, width - 480, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('HORA DA SAÍDA', left + 483, y + 2);
-    doc.fontSize(6.5).font('Helvetica-Bold').text('00:00:00', left + 483, y + 8);
+    const horaSaida = formatTimeOnly(invoice.dataSaidaEntrada) || formatTimeOnly(invoice.dataEmissao) || '';
+    doc.fontSize(6.5).font('Helvetica-Bold').text(horaSaida, left + 483, y + 8);
 
     y += destRow3 + 3;
 
@@ -454,7 +487,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     // Table Header
     const colW = {
       cod: 40,
-      desc: 180,
+      desc: 176,
       ncm: 45,
       cst: 25,
       cfop: 25,
@@ -464,13 +497,13 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
       vtotal: 45,
       bcicms: 45,
       vicms: 35,
-      aliq: 25
+      aliq: 27
     };
 
     doc.rect(left, y, width, 12).fillAndStroke('#f8fafc', '#000000');
     doc.fontSize(4.5).font('Helvetica-Bold').fillColor('#000000');
     
-    let curX = left + 2;
+    let curX = left + 1;
     doc.text('CÓDIGO', curX, y + 3, { width: colW.cod });
     curX += colW.cod;
     doc.text('DESCRIÇÃO DO PRODUTO / SERVIÇO', curX, y + 3, { width: colW.desc });
@@ -506,7 +539,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
       doc.fontSize(5.5).font('Helvetica-Bold').text('DADOS ADICIONAIS', left, currentY);
       currentY += 7;
 
-      const addHeight = Math.max(50, 780 - currentY);
+      const addHeight = Math.min(180, Math.max(55, 785 - currentY));
       doc.rect(left, currentY, 380, addHeight).stroke('#000000');
       doc.fontSize(4.5).font('Helvetica-Bold').text('INFORMAÇÕES COMPLEMENTARES', left + 3, currentY + 2);
       
@@ -533,7 +566,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
       doc.rect(left, currentY, width, 12).fillAndStroke('#f8fafc', '#000000');
       doc.fontSize(4.5).font('Helvetica-Bold').fillColor('#000000');
       
-      let curX = left + 2;
+      let curX = left + 1;
       doc.text('CÓDIGO', curX, currentY + 3, { width: colW.cod });
       curX += colW.cod;
       doc.text('DESCRIÇÃO DO PRODUTO / SERVIÇO', curX, currentY + 3, { width: colW.desc });
@@ -576,10 +609,10 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         doc.rect(left, y, width, itemHeight).stroke('#cbd5e1');
         doc.fontSize(5).font('Helvetica').fillColor('#000000');
 
-        let itemX = left + 2;
+        let itemX = left + 1;
         doc.text(String(it.codigo || '').substring(0, 10), itemX, y + 2, { width: colW.cod });
         itemX += colW.cod;
-        doc.text(String(it.descricao || '').substring(0, 52), itemX, y + 2, { width: colW.desc, ellipsis: true });
+        doc.text(String(it.descricao || '').trim(), itemX, y + 2, { width: colW.desc, ellipsis: true });
         itemX += colW.desc;
         doc.text(it.ncm || '', itemX, y + 2, { width: colW.ncm });
         itemX += colW.ncm;
@@ -591,7 +624,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         itemX += colW.un;
         doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, y + 2, { width: colW.qtd, align: 'right' });
         itemX += colW.qtd;
-        doc.text(formatCurrency(it.valorUnitario), itemX, y + 2, { width: colW.vunit, align: 'right' });
+        doc.text(formatUnitPrice(it.valorUnitario), itemX, y + 2, { width: colW.vunit, align: 'right' });
         itemX += colW.vunit;
         doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, y + 2, { width: colW.vtotal, align: 'right' });
         itemX += colW.vtotal;
@@ -599,7 +632,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         itemX += colW.bcicms;
         doc.text(formatCurrency(it.icms?.valor), itemX, y + 2, { width: colW.vicms, align: 'right' });
         itemX += colW.vicms;
-        doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, y + 2, { width: colW.aliq, align: 'right' });
+        doc.text(formatAliq(it.icms?.aliquota), itemX, y + 2, { width: colW.aliq, align: 'right' });
 
         y += itemHeight;
       }
@@ -650,10 +683,10 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         doc.rect(left, pageY, width, itemHeight).stroke('#cbd5e1');
         doc.fontSize(5).font('Helvetica').fillColor('#000000');
 
-        let itemX = left + 2;
+        let itemX = left + 1;
         doc.text(String(it.codigo || '').substring(0, 10), itemX, pageY + 2, { width: colW.cod });
         itemX += colW.cod;
-        doc.text(String(it.descricao || '').substring(0, 52), itemX, pageY + 2, { width: colW.desc, ellipsis: true });
+        doc.text(String(it.descricao || '').trim(), itemX, pageY + 2, { width: colW.desc, ellipsis: true });
         itemX += colW.desc;
         doc.text(it.ncm || '', itemX, pageY + 2, { width: colW.ncm });
         itemX += colW.ncm;
@@ -665,7 +698,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         itemX += colW.un;
         doc.text(Number(it.quantidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }), itemX, pageY + 2, { width: colW.qtd, align: 'right' });
         itemX += colW.qtd;
-        doc.text(formatCurrency(it.valorUnitario), itemX, pageY + 2, { width: colW.vunit, align: 'right' });
+        doc.text(formatUnitPrice(it.valorUnitario), itemX, pageY + 2, { width: colW.vunit, align: 'right' });
         itemX += colW.vunit;
         doc.font('Helvetica-Bold').text(formatCurrency(it.valorTotal), itemX, pageY + 2, { width: colW.vtotal, align: 'right' });
         itemX += colW.vtotal;
@@ -673,7 +706,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
         itemX += colW.bcicms;
         doc.text(formatCurrency(it.icms?.valor), itemX, pageY + 2, { width: colW.vicms, align: 'right' });
         itemX += colW.vicms;
-        doc.text(it.icms?.aliquota ? `${Number(it.icms.aliquota).toFixed(0)}%` : '0%', itemX, pageY + 2, { width: colW.aliq, align: 'right' });
+        doc.text(formatAliq(it.icms?.aliquota), itemX, pageY + 2, { width: colW.aliq, align: 'right' });
 
         pageY += itemHeight;
       }
