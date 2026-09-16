@@ -4,8 +4,12 @@ import { Company } from '../types';
 import { 
   Building2, UploadCloud, Zap, Globe, Wand2, ArrowRight, CheckCircle2, AlertCircle, ArrowUpRight, ArrowDownLeft, 
   Sparkles, FileText, Check, Edit3, Download, RefreshCw, Plus, Filter, Link, Search,
-  BookOpen, FileSpreadsheet, Layers, Paperclip, FileCheck, ArrowRightLeft, DollarSign, Calendar, Upload, FileUp
+  BookOpen, FileSpreadsheet, Layers, Paperclip, FileCheck, ArrowRightLeft, DollarSign, Calendar, Upload, FileUp, Copy
 } from 'lucide-react';
+
+const formatCurrency = (val: number) => {
+  return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
 
 interface BankReconciliationViewProps {
   company: Company;
@@ -34,6 +38,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [statementTab, setStatementTab] = useState<'file' | 'text'>('file');
   const [ofxContent, setOfxContent] = useState('');
   const [selectedStatementFileName, setSelectedStatementFileName] = useState('');
+  const [isPdfStatement, setIsPdfStatement] = useState(false);
   const [statementFileLinesCount, setStatementFileLinesCount] = useState(0);
   const [statementResult, setStatementResult] = useState<{
     totalFound: number;
@@ -242,16 +247,42 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const processStatementFile = (file: File) => {
     setSelectedStatementFileName(file.name);
     setStatementResult(null);
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    setIsPdfStatement(isPdf);
+
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      if (text) {
-        setOfxContent(text);
-        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-        setStatementFileLinesCount(lines.length);
-      }
-    };
-    reader.readAsText(file, 'utf-8');
+    if (isPdf) {
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        if (base64) {
+          setOfxContent(base64);
+          setStatementFileLinesCount(1);
+        }
+      };
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        if (text) {
+          setOfxContent(text);
+          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+          setStatementFileLinesCount(lines.length);
+        }
+      };
+      reader.onerror = () => {
+        const fallbackReader = new FileReader();
+        fallbackReader.onload = (e) => {
+          const t = e.target?.result as string;
+          if (t) {
+            setOfxContent(t);
+            const lines = t.split(/\r?\n/).filter(l => l.trim().length > 0);
+            setStatementFileLinesCount(lines.length);
+          }
+        };
+        fallbackReader.readAsText(file, 'ISO-8859-1');
+      };
+      reader.readAsText(file, 'utf-8');
+    }
   };
 
   const handleStatementDrop = (e: React.DragEvent) => {
@@ -273,7 +304,11 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     try {
       setUploading(true);
       setStatementResult(null);
-      const res = await api.uploadBpoStatement(company.id, null, ofxContent);
+      const isPdf = isPdfStatement || 
+        selectedStatementFileName.toLowerCase().endsWith('.pdf') || 
+        ofxContent.startsWith('data:application/pdf') ||
+        ofxContent.startsWith('data:application/octet-stream;base64,JVBERi');
+      const res = await api.uploadBpoStatement(company.id, null, ofxContent, isPdf, selectedStatementFileName || undefined);
       setStatementResult(res);
       loadData();
     } catch (err: any) {
@@ -432,22 +467,27 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const file = files[0];
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
       const reader = new FileReader();
       reader.onload = async (event) => {
-        const text = event.target?.result as string;
-        if (text) {
+        const content = event.target?.result as string;
+        if (content) {
           try {
             setDropzoneMsg(`Processando arquivo "${file.name}"...`);
-            await api.uploadBpoStatement(company.id, null, text);
+            await api.uploadBpoStatement(company.id, null, content, isPdf, file.name);
             setDropzoneMsg(`Arquivo "${file.name}" importado e integrado aos lançamentos!`);
             loadData();
             setTimeout(() => setDropzoneMsg(''), 4000);
           } catch (err: any) {
-            setDropzoneMsg(`Aviso: Arquivo "${file.name}" recebido e catalogado.`);
+            setDropzoneMsg(`Erro ao importar "${file.name}": ${err.message}`);
           }
         }
       };
-      reader.readAsText(file);
+      if (isPdf) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file, 'utf-8');
+      }
     }
   };
 
@@ -803,7 +843,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
               <div className="space-y-4 animate-fade-in">
                 <div className="p-4 rounded-xl bg-emerald-950/50 border border-emerald-500/30 space-y-2">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                    <CheckCircle className="w-5 h-5" />
+                    <CheckCircle2 className="w-5 h-5" />
                     <span>Extrato Processado e Auditado com Sucesso!</span>
                   </div>
                   <p className="text-xs text-slate-300">

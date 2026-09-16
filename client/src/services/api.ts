@@ -426,11 +426,17 @@ export const api = {
     return json.data;
   },
 
-  async uploadBpoStatement(companyId: string, accountId: string | null, ofxContent: string): Promise<any> {
+  async uploadBpoStatement(companyId: string, accountId: string | null, ofxContent: string, isPdf?: boolean, fileName?: string): Promise<any> {
     const res = await fetch(`${API_BASE}/bpo/upload-statement`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ company_id: companyId, bank_account_id: accountId, ofx_content: ofxContent }),
+      body: JSON.stringify({ 
+        company_id: companyId, 
+        bank_account_id: accountId, 
+        ofx_content: ofxContent,
+        is_pdf: isPdf,
+        file_name: fileName
+      }),
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Falha ao importar extrato');

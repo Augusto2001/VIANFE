@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '../database/db.js';
 import { v4 as uuidv4 } from 'uuid';
 import { parseOfx } from '../services/ofxParser.js';
+import { PDFParse } from 'pdf-parse';
 import { predictiveAlertsService } from '../services/predictiveAlertsService.js';
 import { openFinanceService } from '../services/openFinanceService.js';
 
@@ -58,16 +59,48 @@ export const bpoController = {
     }
   },
 
-  // 3. Upload & Parse Statement (OFX or JSON)
+  // 3. Upload & Parse Statement (OFX, PDF, CSV, TXT)
   async uploadStatement(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, bank_account_id, ofx_content } = req.body;
+      const { company_id, bank_account_id, ofx_content, is_pdf, file_name } = req.body;
       if (!company_id || !ofx_content) {
         res.status(400).json({ error: 'company_id e ofx_content são obrigatórios' });
         return;
       }
 
-      const parsed = parseOfx(ofx_content);
+      let textContent = ofx_content;
+      const isPdfFile = is_pdf === true || 
+        (typeof file_name === 'string' && file_name.toLowerCase().endsWith('.pdf')) ||
+        (typeof ofx_content === 'string' && (
+          ofx_content.startsWith('data:application/pdf') ||
+          ofx_content.startsWith('data:application/octet-stream;base64,JVBERi') ||
+          ofx_content.startsWith('%PDF')
+        ));
+
+      if (isPdfFile) {
+        try {
+          let pdfBuffer: Buffer;
+          if (ofx_content.startsWith('data:')) {
+            const base64Data = ofx_content.split(',')[1] || ofx_content;
+            pdfBuffer = Buffer.from(base64Data, 'base64');
+          } else if (ofx_content.startsWith('%PDF')) {
+            pdfBuffer = Buffer.from(ofx_content, 'binary');
+          } else {
+            pdfBuffer = Buffer.from(ofx_content, 'base64');
+          }
+
+          const parser = new PDFParse({ data: pdfBuffer });
+          const pdfResult = await parser.getText();
+          textContent = pdfResult.text || '';
+          await parser.destroy().catch(() => {});
+        } catch (pdfErr: any) {
+          console.error('Erro ao processar arquivo PDF de extrato:', pdfErr);
+          res.status(400).json({ error: `Falha ao processar arquivo PDF: ${pdfErr.message}` });
+          return;
+        }
+      }
+
+      const parsed = parseOfx(textContent);
       let insertedCount = 0;
 
       // Fetch active financial categories, rules, and pending invoice installments (duplicatas)

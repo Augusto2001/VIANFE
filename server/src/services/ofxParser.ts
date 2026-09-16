@@ -21,39 +21,60 @@ export interface OfxParsedStatement {
   transactions: OfxTransaction[];
 }
 
+function cleanXmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 export function parseOfx(rawContent: string): OfxParsedStatement {
   const content = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
-  // If contains OFX tags, use OFX Parser
-  if (content.includes('<STMTTRN>') || content.includes('<OFX>') || content.includes('OFXHEADER')) {
+  // Detecção case-insensitive para arquivos OFX (SGML e XML)
+  if (/<STMTTRN>|<OFX>|OFXHEADER|<BANKTRANLIST>|<CCSTMTTRNRS>/i.test(content)) {
     return parseStandardOfx(content);
   }
 
-  // Otherwise, use CSV/TXT Multi-Format Parser
+  // Caso contrário, usa o Parser universal para CSV, TXT e texto extraído de PDF
   return parseCsvOrTxtStatement(content);
 }
 
 function parseStandardOfx(content: string): OfxParsedStatement {
   const transactions: OfxTransaction[] = [];
 
-  const bankMatch = content.match(/<BANKID>(.*?)(\n|<)/i);
-  const acctMatch = content.match(/<ACCTID>(.*?)(\n|<)/i);
+  const bankMatch = content.match(/<BANKID>\s*(.*?)(\n|<)/i);
+  const acctMatch = content.match(/<ACCTID>\s*(.*?)(\n|<)/i);
 
   const bankId = bankMatch ? bankMatch[1].trim() : undefined;
   const accountId = acctMatch ? acctMatch[1].trim() : undefined;
 
-  const trnRegex = /<STMTTRN>([\s\S]*?)(?:<\/STMTTRN>|(?=<STMTTRN>)|$)/gi;
-  let match;
+  // Quebra por <STMTTRN> de forma resiliente a SGML (sem fechamento) e XML (com fechamento)
+  const parts = content.split(/<STMTTRN>/i);
+  for (let i = 1; i < parts.length; i++) {
+    let block = parts[i];
+    const endTagIdx = block.search(/<\/STMTTRN>/i);
+    if (endTagIdx !== -1) {
+      block = block.substring(0, endTagIdx);
+    } else {
+      const closingIdx = block.search(/<\/(?:BANKTRANLIST|CCSTMTTRNRS|STMTRS|CCSTMTRS)>/i);
+      if (closingIdx !== -1) {
+        block = block.substring(0, closingIdx);
+      }
+    }
 
-  while ((match = trnRegex.exec(content)) !== null) {
-    const trnBlock = match[1];
-
-    const typeMatch = trnBlock.match(/<TRNTYPE>(.*?)(\n|<)/i);
-    const dateMatch = trnBlock.match(/<DTPOSTED>(\d{4})(\d{2})(\d{2})(.*?)(\n|<)/i);
-    const amtMatch = trnBlock.match(/<TRNAMT>([-\d.,]+)(\n|<)/i);
-    const fitidMatch = trnBlock.match(/<FITID>(.*?)(\n|<)/i);
-    const memoMatch = trnBlock.match(/<MEMO>(.*?)(\n|<)/i);
-    const nameMatch = trnBlock.match(/<NAME>(.*?)(\n|<)/i);
+    const typeMatch = block.match(/<TRNTYPE>\s*(.*?)(\n|<|$)/i);
+    const dateMatch = block.match(/<DTPOSTED>\s*(\d{4})(\d{2})(\d{2})/i);
+    const amtMatch = block.match(/<TRNAMT>\s*([-\d.,]+)/i);
+    const fitidMatch = block.match(/<FITID>\s*(.*?)(\n|<|$)/i);
+    const checknumMatch = block.match(/<CHECKNUM>\s*(.*?)(\n|<|$)/i);
+    const refnumMatch = block.match(/<REFNUM>\s*(.*?)(\n|<|$)/i);
+    const memoMatch = block.match(/<MEMO>\s*(.*?)(\n|<|$)/i);
+    const nameMatch = block.match(/<NAME>\s*(.*?)(\n|<|$)/i);
 
     if (dateMatch && amtMatch) {
       const year = dateMatch[1];
@@ -63,12 +84,22 @@ function parseStandardOfx(content: string): OfxParsedStatement {
 
       let rawAmt = amtMatch[1].trim().replace(',', '.');
       const numAmt = parseFloat(rawAmt);
+      if (isNaN(numAmt)) continue;
 
       const trnType = numAmt < 0 ? 'DEBITO' : 'CREDITO';
-      const absValor = Math.abs(numAmt);
+      const absValor = Math.round(Math.abs(numAmt) * 100) / 100;
 
-      const desc = (memoMatch ? memoMatch[1].trim() : (nameMatch ? nameMatch[1].trim() : 'Transação Bancária')).replace(/&amp;/g, '&');
-      const doc = fitidMatch ? fitidMatch[1].trim() : `OFX_${year}${month}${day}_${Math.random().toString(36).substring(7)}`;
+      const memo = memoMatch ? cleanXmlEntities(memoMatch[1]) : '';
+      const name = nameMatch ? cleanXmlEntities(nameMatch[1]) : '';
+      const desc = memo || name || 'Transação Bancária';
+
+      const doc = fitidMatch 
+        ? fitidMatch[1].trim() 
+        : (checknumMatch 
+          ? checknumMatch[1].trim() 
+          : (refnumMatch 
+            ? refnumMatch[1].trim() 
+            : `OFX_${year}${month}${day}_${i}_${Math.random().toString(36).substring(7)}`));
 
       transactions.push({
         id: doc,
@@ -90,81 +121,110 @@ function parseStandardOfx(content: string): OfxParsedStatement {
 
 function parseCsvOrTxtStatement(content: string): OfxParsedStatement {
   const transactions: OfxTransaction[] = [];
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+
+  // Palavras-chave a ignorar (cabeçalhos, saldos diários e totalizadores)
+  const IGNORE_KEYWORDS = [
+    'SALDO ANTERIOR', 'SALDO DO DIA', 'SALDO ATUAL', 'SALDO DISPONIVEL', 'SALDO DISPONÍVEL',
+    'SALDO EM CONTA', 'SALDO BLOQUEADO', 'TOTALIZADOR', 'EXTRATO DE CONTA', 'EXTRATO BANCARIO',
+    'EXTRATO MENSAL', 'EXTRATO PERIODO', 'PERIODO:', 'PERÍODO:', 'AGENCIA:', 'AGÊNCIA:',
+    'CONTA:', 'CONTA CORRENTE', 'TITULAR:', 'CNPJ:', 'CPF:', 'DATA;LANCAMENTO', 'DATA;HISTORICO'
+  ];
+
+  const currentYear = new Date().getFullYear().toString();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const upperLine = line.toUpperCase();
 
-    // 1. Try date pattern: DD/MM/YYYY or YYYY-MM-DD or DD-MM-YYYY
-    const dateMatch = line.match(/(\d{2})[\/\.-](\d{2})[\/\.-](\d{4})/) || line.match(/(\d{4})[\/\.-](\d{2})[\/\.-](\d{2})/);
-    if (!dateMatch) continue;
+    // Ignora linhas de saldo e cabeçalhos informativos
+    if (IGNORE_KEYWORDS.some(kw => upperLine.includes(kw))) {
+      continue;
+    }
 
+    // 1. Detecção de Data: YYYY-MM-DD ou DD/MM/YYYY ou DD/MM/YY ou DD/MM
     let formattedDate = '';
-    if (dateMatch[1].length === 4) {
-      // YYYY-MM-DD
-      formattedDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    let dateStrRaw = '';
+
+    const dateIsoMatch = line.match(/\b(\d{4})[\/\.-](\d{2})[\/\.-](\d{2})\b/);
+    const dateFullMatch = line.match(/\b(\d{2})[\/\.-](\d{2})[\/\.-](\d{4})\b/);
+    const dateShortYearMatch = line.match(/\b(\d{2})[\/\.-](\d{2})[\/\.-](\d{2})\b/);
+    const dateNoYearMatch = line.match(/\b(\d{2})[\/\.-](\d{2})\b/);
+
+    if (dateIsoMatch) {
+      formattedDate = `${dateIsoMatch[1]}-${dateIsoMatch[2]}-${dateIsoMatch[3]}`;
+      dateStrRaw = dateIsoMatch[0];
+    } else if (dateFullMatch) {
+      formattedDate = `${dateFullMatch[3]}-${dateFullMatch[2]}-${dateFullMatch[1]}`;
+      dateStrRaw = dateFullMatch[0];
+    } else if (dateShortYearMatch) {
+      const year = parseInt(dateShortYearMatch[3], 10) > 50 ? `19${dateShortYearMatch[3]}` : `20${dateShortYearMatch[3]}`;
+      formattedDate = `${year}-${dateShortYearMatch[2]}-${dateShortYearMatch[1]}`;
+      dateStrRaw = dateShortYearMatch[0];
+    } else if (dateNoYearMatch && (upperLine.includes('PIX') || upperLine.includes('TED') || upperLine.includes('PAGTO') || upperLine.includes('TAR') || upperLine.includes('DEB') || upperLine.includes('CRED'))) {
+      formattedDate = `${currentYear}-${dateNoYearMatch[2]}-${dateNoYearMatch[1]}`;
+      dateStrRaw = dateNoYearMatch[0];
     } else {
-      // DD/MM/YYYY
-      formattedDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+      continue;
     }
 
-    // Try splitting by delimiter (;, tab, comma, |)
-    let parts = line.split(/[;\t,|]/).map(p => p.trim().replace(/^["']|["']$/g, ''));
-    
-    // If not delimited, split by multiple spaces (colunado TXT)
-    if (parts.length < 2) {
-      parts = line.split(/\s{2,}/).map(p => p.trim());
-    }
+    // 2. Extração de valores monetários
+    const moneyRegex = /[+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{3})*,\d{2}|[+-]?\s*\d+\.\d{2}/g;
+    const matches = [...line.matchAll(moneyRegex)];
 
-    // Extract amount: look for monetary values like "1.234,56" or "-1234.56" or "1500,00 D"
-    let detectedValor = 0;
-    let detectedTipo: 'CREDITO' | 'DEBITO' = 'DEBITO';
-    let detectedDesc = '';
-    let detectedDoc = `TXT_${formattedDate.replace(/-/g, '')}_${i}`;
+    if (matches.length === 0) continue;
 
-    // Find token with currency/numbers
-    for (let pIdx = 0; pIdx < parts.length; pIdx++) {
-      const part = parts[pIdx];
-      
-      // Clean number
-      const numMatch = part.match(/([+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2})|([+-]?\s*\d+[.,]\d{2})/);
-      if (numMatch) {
-        let cleanVal = numMatch[0].replace(/\s+/g, '');
-        const isNegative = cleanVal.includes('-') || line.toUpperCase().includes(' D ') || line.toUpperCase().endsWith(' D') || line.toUpperCase().includes('DEBITO') || line.toUpperCase().includes('DÉBITO');
-        
-        if (cleanVal.includes(',')) {
-          cleanVal = cleanVal.replace(/\./g, '').replace(',', '.');
-        }
-        
-        const parsedNum = parseFloat(cleanVal);
-        if (!isNaN(parsedNum) && Math.abs(parsedNum) > 0) {
-          detectedValor = Math.abs(parsedNum);
-          detectedTipo = isNegative || parsedNum < 0 ? 'DEBITO' : 'CREDITO';
-        }
-      } else if (part.length > 3 && !part.match(/^\d{2}[\/\.-]\d{2}[\/\.-]\d{4}$/) && !detectedDesc) {
-        detectedDesc = part;
+    const targetMatch = matches[0][0].replace(/\s+/g, '');
+
+    let isNegative = false;
+    if (targetMatch.includes('-')) {
+      isNegative = true;
+    } else if (upperLine.includes(' D ') || upperLine.endsWith(' D') || upperLine.includes('DEBITO') || upperLine.includes('DÉBITO') || upperLine.includes('PAGTO') || upperLine.includes('TARIFA') || upperLine.includes('COMPRA')) {
+      if (!upperLine.includes(' C ') && !upperLine.endsWith(' C') && !upperLine.includes('CREDITO') && !upperLine.includes('CRÉDITO') && !upperLine.includes('RECEB') && !upperLine.includes('DEP')) {
+        isNegative = true;
       }
     }
 
-    // Fallback description from full line if not parsed cleanly
-    if (!detectedDesc) {
-      detectedDesc = line
-        .replace(/\d{2}[\/\.-]\d{2}[\/\.-]\d{4}/, '')
-        .replace(/[+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}/, '')
-        .replace(/[;,\t|]/g, ' ')
-        .trim();
+    let cleanVal = targetMatch.replace('+', '').replace('-', '');
+    if (cleanVal.includes(',')) {
+      cleanVal = cleanVal.replace(/\./g, '').replace(',', '.');
+    }
+    const numVal = parseFloat(cleanVal);
+    if (isNaN(numVal) || numVal === 0) continue;
+
+    const absValor = Math.round(numVal * 100) / 100;
+    const tipo = isNegative ? 'DEBITO' : 'CREDITO';
+
+    // 3. Descrição limpa da transação
+    let desc = line
+      .replace(dateStrRaw, '')
+      .replace(matches[0][0], '');
+
+    if (matches.length > 1) {
+      desc = desc.replace(matches[matches.length - 1][0], '');
     }
 
-    if (detectedValor > 0 && detectedDesc) {
-      transactions.push({
-        id: detectedDoc,
-        data: formattedDate,
-        tipo: detectedTipo,
-        valor: detectedValor,
-        documento: detectedDoc,
-        descricao: detectedDesc
-      });
+    desc = desc
+      .replace(/[;,\t|]/g, ' ')
+      .replace(/\s+[DC]\s*$/i, '')
+      .replace(/\s+[DC]\s+/i, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    if (!desc || desc.length < 2) {
+      desc = `Transação ${tipo === 'DEBITO' ? 'Débito' : 'Crédito'}`;
     }
+
+    const docId = `EXT_${formattedDate.replace(/-/g, '')}_${i}_${Math.random().toString(36).substring(7)}`;
+
+    transactions.push({
+      id: docId,
+      data: formattedDate,
+      tipo,
+      valor: absValor,
+      documento: docId,
+      descricao: desc
+    });
   }
 
   return {
