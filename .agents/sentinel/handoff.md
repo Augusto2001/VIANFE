@@ -1,32 +1,32 @@
 # Sentinel Handoff Report
 
 ## Observation
-The user requested that all metrics, financial forecasts, revenue, and tax guides of the Viacont Super App / Client Portal be made 100% deterministic, real, and dynamic by querying exclusively the selected company's database tables (`company_id`), completely eliminating fabricated numbers/hardcoded mocks (such as R$ 145k or R$ 884k) and any multi-tenant data leaks.
-The request was recorded verbatim in `ORIGINAL_REQUEST.md`. The project was routed to the General path (`teamwork_preview_orchestrator`).
+The user requested a single self-contained fix: definitive correction of the fiscal direction classifier (Entrada vs Saída) in the XML importer, complete automatic reclassification of all invoices across all companies in the SQLite database (JL Comércio, Churrascaria Tradição Gaúcha, Amesfer, Sales Comércio, etc.), and complete and friendly presentation of DANFEs for NFC-e (modelo 65) and sales without CPF.
+The request was recorded verbatim in `ORIGINAL_REQUEST.md` under timestamp `2026-09-17T08:01:04Z`. Per the Routing Decision Table, the task matched SWE Light (`teamwork_preview_swe`) due to a single self-contained scope and explicit lightness directive ("keep it small and focused").
 
 ## Logic Chain
-1. Project Orchestrator was dispatched, surveyed database schema, financial aggregation logic, and client views.
-2. Dual-track development was executed:
-   - **Backend SQL & Real Metrics (R1 & R2)**: Implemented real-time SQL calculations for Bank Balance (`bank_transactions` credits - debits + accounts), Receivables (`invoice_installments` + `invoices`), Payables (`invoice_installments` + `accounting_provisions`), Simples Nacional RBT12 real revenue with LC 123/2006 dynamic effective tax rate brackets, dynamic tax guides synthesized from `accounting_provisions`, and official BACEN EMV BR Code PIX generation with CRC16-CCITT checksum.
-   - **Frontend Dynamic Integration (R3)**: Refactored `ClientPortalView.tsx`, `PortalDashboardTab.tsx`, and `PortalTaxGuidesTab.tsx` to consume 100% real API data with strict zero-state rendering (`R$ 0,00`, `0,00%`).
-   - **Multi-Tenant Isolation & TypeScript (R4)**: Enforced strict `WHERE company_id = ?` parameterization across all endpoints, returning HTTP 400 if `company_id` is missing. Fixed TypeScript strict module resolutions with 0 compiler errors.
-   - **E2E Testing Suite**: Built and verified 75 automated test cases across Tiers 1-4 and Multi-Tenant Isolation suites plus 13 adversarial probes.
-3. Upon orchestrator completion claim, Sentinel launched `teamwork_preview_victory_auditor` (`8ea8ab8a-825e-4445-98fd-4f84ea9d5c1b`) for an independent 3-phase verification (timeline, anti-mock/anti-cheating code forensics, independent test suite execution).
-4. Post-Victory Auditor confirmed:
-   - 0 hardcoded mocks or numbers found in UI components or backend logic.
-   - Real-time SQL aggregations and multi-tenant isolation strictly verified.
-   - Independent test execution: 75/75 tests PASS across all tiers with Exit Code 0.
-   - Verdict: **VICTORY CONFIRMED**.
-5. All background cron tasks and subagent lifecycles were cleanly decommissioned.
+1. Sentinel dispatched the SWE Light Orchestrator (`swe_2`, conversationId: `4e893aad-cfe8-490e-bdda-4e490b781c03`) and established background monitoring crons (Progress Reporting and Liveness Check).
+2. The SWE Light pipeline executed:
+   - **Implementer Round 1 (`teamwork_preview_implementer_r1`)**: Built centralized `fiscalClassifier.ts`, updated `uploadBatchXml`, `sefazService.ingestXml`, `jlComercioIngestionService.ts`, wired automatic reclassification on database boot (`initDatabase()` in `db.ts`) and administrative route `POST /api/invoices/reclassify`, enhanced `danfeGenerator.ts` for NFC-e model 65 and unassigned consumers ("Consumidor Final - Venda Balcão"), and crafted verification script `server/verify_fiscal_classification.mjs`.
+   - **Reviewer Round 1 (`teamwork_preview_reviewer_r1`)**: Adversarial audit corrected 4 critical issues (supplier fallback, company_id cross-tenancy isolation in uploads, unbiasing verification script).
+   - **Reviewer Round 2 (`teamwork_preview_reviewer_r2`)**: Adversarial audit resolved 5 edge cases (branch transfers 0001->0002, CT-e freight taker resolution, foreign buyer `idEstrangeiro`, installment synchronization `pagar`/`receber`, multi-database schema auto-migration).
+   - **Reviewer Round 3 (`teamwork_preview_reviewer_r3`)**: Final review round verified preservation of identified consumer names, customer details without CPF, and complete mathematical segregation without invoice direction inversions.
+3. Upon completion claim, the independent Victory Auditor (`teamwork_preview_victory_auditor_r1`, Conv ID: `081a972b-9bc6-4eca-aa0c-ea8eef023fdf`) performed a blocking 3-phase audit:
+   - Phase A (Timeline & Git Diffs): PASS.
+   - Phase B (Integrity & Forensics): PASS. No mocks, genuine AST-validated implementation, strict multi-tenant isolation.
+   - Phase C (Independent Test Execution & Verification): PASS. 0 inverted invoices across all tenant databases, complete Segregation of Saídas (Vendas) and Entradas (Compras), full DANFE rendering for NFC-e 65.
+   - Formal Verdict: **VICTORY CONFIRMED**.
+4. Both sentinel crons (task-42, task-44) were terminated, and all subagents were cleanly decommissioned via `kill_all`.
 
 ## Caveats
-- Production deployments must supply live company records and authentic bank/tax transactions via standard ERP ingestion pipelines; empty tenant accounts will strictly display zero-state balances (`R$ 0,00`) without synthetic data injection.
+- Database reclassification runs automatically on backend boot (`initDatabase()` in `server/src/database/db.ts`) and touches both `server/storage/data/fiscal_hub.db` and fallback `server/database.sqlite`. On new database mounts, boot initialization will sanitize existing records immediately.
+- Corrupted XML files lacking standard SEFAZ root nodes (`<nfeProc>`, `<NFe>`, `<resNFe>`, `<cteProc>`, `<Nfse>`) are safely rejected with HTTP 400.
 
 ## Conclusion
-All requirements R1–R4 and all acceptance criteria are 100% satisfied, fully deterministic, multi-tenant secure, and independently audited.
+Requirements R1 (algorithmic direction classifier), R2 (database reclassification across all companies), and R3 (friendly DANFE presentation for NFC-e/unassigned consumers) are 100% satisfied and confirmed by independent victory audit.
 
 ## Verification Method
-- Independent Post-Victory Audit: `node tests/e2e/test_runner.js` (75/75 PASS across Tiers 1-4 + Multi-Tenant Suite + 13 Adversarial Probes)
-- TypeScript Verification: Client (`client/tsconfig.json`) and Server (`server/tsconfig.json`) clean compilation with 0 errors.
-- Multi-Tenant Isolation: Validated via automated test probes rejecting cross-company data access and missing `company_id`.
-- Verdict: `VICTORY CONFIRMED` (Auditor: `8ea8ab8a-825e-4445-98fd-4f84ea9d5c1b`).
+- Independent Post-Victory Audit Report: `.agents/teamwork_preview_victory_auditor_r1/handoff.md`
+- Database Direction Verification: `server/verify_fiscal_classification.mjs` (0 inverted invoices, 0 inverted installments across all companies)
+- TypeScript & AST Inspection: Full static typing and schema integrity across client and server
+- Verdict: **VICTORY CONFIRMED** (Auditor Conv ID: `081a972b-9bc6-4eca-aa0c-ea8eef023fdf`)

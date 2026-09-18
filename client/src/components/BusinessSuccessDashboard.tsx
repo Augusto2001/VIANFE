@@ -19,46 +19,30 @@ export const BusinessSuccessDashboard: React.FC<BusinessSuccessDashboardProps> =
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
   const [sendFeedback, setSendFeedback] = useState<string | null>(null);
 
+  // Active company ID ref to prevent cross-company data leakage
+  const activeCompanyIdRef = React.useRef(company.id);
+
   const loadKpis = async () => {
+    const currentCompId = company.id;
     try {
       setLoading(true);
       const res = await api.getBusinessSuccess(company.id);
+      if (activeCompanyIdRef.current !== currentCompId) {
+        return; // Discard stale response from prior company
+      }
       setData(res);
     } catch (err: any) {
       console.error('Erro ao carregar Painel do Sucesso:', err);
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSendWhatsApp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!targetPhone || targetPhone.length < 10) {
-      alert('Informe um número de WhatsApp válido com DDD (ex: 5585999999999)');
-      return;
-    }
-
-    try {
-      setSendingWhatsApp(true);
-      setSendFeedback(null);
-      const messageText = `📊 *FECHAMENTO EXECUTIVO VIACONT* 📊\nEmpresa: *${company.razao_social}*\nCNPJ: ${company.cnpj}\n\n💰 *Faturamento Bruto:* ${(data?.dre?.receitaBruta || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n📈 *Lucro Líquido:* ${(data?.dre?.lucroLiquido || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n🛡️ *Radar Fiscal:* ${data?.radarFiscal?.nivelRisco === 'BAIXO' ? '✅ Zero Risco (100% Coberto)' : '⚠️ Atenção / Divergência'}\n\n🏆 *Top Fornecedor:* ${data?.top5Fornecedores?.[0]?.fornecedor || 'N/A'}\n\n_Gerado com segurança pelo Ecossistema ViaNfe por Viacont._`;
-      
-      const res = await api.sendWhatsAppSafe({
-        phone: targetPhone,
-        message: messageText,
-        companyName: company.razao_social,
-        isManualTrigger: true
-      });
-
-      setSendFeedback(res.message || 'Disparo concluído com sucesso!');
-    } catch (err: any) {
-      setSendFeedback(`Aviso: ${err.message}`);
-    } finally {
-      setSendingWhatsApp(false);
+      if (activeCompanyIdRef.current === currentCompId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    activeCompanyIdRef.current = company.id;
+    setData(null); // Immediate state reset to prevent displaying previous company's KPIs
     loadKpis();
   }, [company.id]);
 

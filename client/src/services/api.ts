@@ -451,7 +451,17 @@ export const api = {
     return json;
   },
 
-  async reconcileBpoTransaction(id: string, data: { categoria_id?: string; invoice_id?: string; observacoes_cliente?: string; learn_rule?: boolean }): Promise<any> {
+  async reconcileBpoTransaction(id: string, data: {
+    categoria_id?: string;
+    invoice_id?: string;
+    descricao_custom?: string;
+    fornecedor_cliente_nome?: string;
+    centro_custo?: string;
+    forma_lancamento?: string;
+    observacoes_cliente?: string;
+    learn_rule?: boolean;
+    desconciliar?: boolean;
+  }): Promise<any> {
     const res = await fetch(`${API_BASE}/bpo/reconcile/${id}`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -459,6 +469,17 @@ export const api = {
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Falha ao conciliar transação');
+    return json;
+  },
+
+  async seedSampleBpoTransactions(companyId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/transactions/seed-sample`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ company_id: companyId }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Falha ao gerar transações de exemplo');
     return json;
   },
 

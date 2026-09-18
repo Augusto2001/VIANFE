@@ -68,6 +68,7 @@ export const ClientPortalView: React.FC<ClientPortalViewProps> = ({
   };
 
   useEffect(() => {
+    setInvoices([]);
     if (activeTab === 'manifestar_nfe') {
       loadManifestInvoices();
     }

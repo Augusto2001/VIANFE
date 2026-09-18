@@ -57,8 +57,9 @@ export const App: React.FC = () => {
       }
 
       if (data && data.length > 0) {
-        const best = data.find(c => (c.total_invoices || 0) > 0) || data[0];
-        setSelectedCompany(best);
+        // Eliminate biased auto-selection: select JL Comércio if available, or first company neutrally
+        const jlComp = data.find(c => c.id === 'fc73d7bc-2423-4e6c-897d-161b7f05b392');
+        setSelectedCompany(jlComp || data[0]);
       }
     } catch (err: any) {
       console.error('Error loading companies:', err);

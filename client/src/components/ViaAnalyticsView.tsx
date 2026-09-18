@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Company, Invoice } from '../types';
 import { api } from '../services/api';
 import { 
@@ -37,25 +37,37 @@ export const ViaAnalyticsView: React.FC<ViaAnalyticsViewProps> = ({ selectedComp
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState('');
 
+  // Active company ID ref to prevent cross-company data leakage during async fetches
+  const activeCompanyIdRef = useRef<string | null>(selectedCompany?.id || null);
+
   useEffect(() => {
+    activeCompanyIdRef.current = selectedCompany?.id || null;
+    setInvoices([]); // Immediate reset to eliminate cross-company contamination
     if (selectedCompany) {
       loadInvoices();
     }
-  }, [selectedCompany, period]);
+  }, [selectedCompany?.id, period]);
 
   const loadInvoices = async () => {
     if (!selectedCompany) return;
+    const currentCompanyId = selectedCompany.id;
     try {
       setLoading(true);
       const res = await api.getInvoices({
-        company_id: selectedCompany.id,
+        company_id: currentCompanyId,
         limit: 500,
       });
+      // Discard stale response if user switched companies while request was in-flight
+      if (activeCompanyIdRef.current !== currentCompanyId) {
+        return;
+      }
       setInvoices(res.invoices);
     } catch (err) {
       console.error('Error loading invoices for analytics:', err);
     } finally {
-      setLoading(false);
+      if (activeCompanyIdRef.current === currentCompanyId) {
+        setLoading(false);
+      }
     }
   };
 

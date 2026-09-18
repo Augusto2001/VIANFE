@@ -101,14 +101,12 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const [savingCaptchaKey, setSavingCaptchaKey] = useState(false);
   const [showCaptchaConfig, setShowCaptchaConfig] = useState(false);
 
-  useEffect(() => {
-    if (selectedCompany) {
-      loadData();
-    }
-  }, [selectedCompany]);
+  // Active company ID ref to prevent cross-company data leakage
+  const activeCompanyIdRef = React.useRef<string | null>(selectedCompany?.id || null);
 
   const loadData = async () => {
     if (!selectedCompany) return;
+    const currentCompId = selectedCompany.id;
     try {
       setLoading(true);
       const [list, clients, key, focusCfg] = await Promise.all([
@@ -117,6 +115,11 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
         api.getCaptchaKey().catch(() => ''),
         api.getFocusNfeConfig(selectedCompany.id).catch(() => ({ focus_nfe_token: '', nfse_provedor: 'focus_nfe' }))
       ]);
+
+      if (activeCompanyIdRef.current !== currentCompId) {
+        return; // Discard response from previous company
+      }
+
       setNfseList(list || []);
       setRecurringClients(clients || []);
       setCaptchaKey(key || '');
@@ -126,9 +129,21 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
     } catch (err) {
       console.error('Error loading NFS-e data:', err);
     } finally {
-      setLoading(false);
+      if (activeCompanyIdRef.current === currentCompId) {
+        setLoading(false);
+      }
     }
   };
+
+  useEffect(() => {
+    activeCompanyIdRef.current = selectedCompany?.id || null;
+    // Immediate state reset on company change
+    setNfseList([]);
+    setRecurringClients([]);
+    if (selectedCompany) {
+      loadData();
+    }
+  }, [selectedCompany?.id]);
 
   const handleSaveFocusConfig = async () => {
     if (!selectedCompany) return;

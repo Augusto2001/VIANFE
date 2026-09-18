@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Zap, Server, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
 
+import { Company } from '../types';
+
 interface EngineLog {
   id: string;
   timestamp: string;
@@ -10,15 +12,20 @@ interface EngineLog {
   company: string;
 }
 
-export const LiveEngineStream: React.FC = () => {
+interface LiveEngineStreamProps {
+  selectedCompany?: Company | null;
+}
+
+export const LiveEngineStream: React.FC<LiveEngineStreamProps> = ({ selectedCompany }) => {
   const [logs, setLogs] = useState<EngineLog[]>([]);
   const [processedRate, setProcessedRate] = useState(1427);
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
+    const activeCompanyName = selectedCompany ? (selectedCompany.nome_fantasia || selectedCompany.razao_social) : 'VIANFE MOTOR';
     const initialLogs: EngineLog[] = [
-      { id: '1', timestamp: new Date().toLocaleTimeString('pt-BR'), chave: '3526060294827800011055001000306324...', action: 'mTLS Handshake + Decodificação SEFAZ', status: 'mTLS', company: 'SALES COMÉRCIO' },
-      { id: '2', timestamp: new Date().toLocaleTimeString('pt-BR'), chave: '2926051511219600018355002000259325...', action: 'DANFE PDF Gerado & Armazenado', status: 'DANFE', company: 'LOPES COMÉRCIO' },
+      { id: '1', timestamp: new Date().toLocaleTimeString('pt-BR'), chave: '3526060294827800011055001000306324...', action: 'mTLS Handshake + Decodificação SEFAZ', status: 'mTLS', company: activeCompanyName },
+      { id: '2', timestamp: new Date().toLocaleTimeString('pt-BR'), chave: '2926051511219600018355002000259325...', action: 'DANFE PDF Gerado & Armazenado', status: 'DANFE', company: activeCompanyName },
     ];
     setLogs(initialLogs);
 
@@ -29,7 +36,7 @@ export const LiveEngineStream: React.FC = () => {
         '3126052147359000022055001000119038...',
         '4126057946019200017955002000528313...'
       ];
-      const sampleCompanies = ['SALES COMÉRCIO', 'LOPES COMÉRCIO', 'AMSFER COMERCIAL'];
+      const compName = selectedCompany ? (selectedCompany.nome_fantasia || selectedCompany.razao_social) : 'VIANFE MOTOR';
       const sampleActions = [
         'Decodificação mTLS SEFAZ com Certificado A1',
         'Ingestão em Banco de Dados Seguro',
@@ -37,21 +44,21 @@ export const LiveEngineStream: React.FC = () => {
       ];
       const statuses: ('mTLS' | 'Ingested' | 'DANFE' | 'Synced')[] = ['mTLS', 'Ingested', 'DANFE'];
 
-      const randomIdx = Math.floor(Math.random() * sampleCompanies.length);
+      const randomIdx = Math.floor(Math.random() * sampleActions.length);
       const newLog: EngineLog = {
         id: String(Date.now()),
         timestamp: new Date().toLocaleTimeString('pt-BR'),
         chave: sampleChaves[randomIdx],
         action: sampleActions[randomIdx],
         status: statuses[randomIdx],
-        company: sampleCompanies[randomIdx],
+        company: compName,
       };
 
       setLogs(prev => [newLog, ...prev.slice(0, 4)]);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedCompany?.id]);
 
   const latestLog = logs[0];
 

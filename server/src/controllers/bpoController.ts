@@ -303,11 +303,21 @@ export const bpoController = {
     }
   },
 
-  // 5. Reconcile transaction with 1-click
+  // 5. Reconcile transaction with Conta Azul Side-by-Side fields
   async reconcileTransaction(req: Request, res: Response): Promise<void> {
     try {
       const id = String(req.params.id);
-      const { categoria_id, invoice_id, observacoes_cliente, learn_rule } = req.body;
+      const { 
+        categoria_id, 
+        invoice_id, 
+        descricao_custom,
+        fornecedor_cliente_nome,
+        centro_custo,
+        forma_lancamento,
+        observacoes_cliente, 
+        learn_rule,
+        desconciliar
+      } = req.body;
 
       const trn = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id) as any;
       if (!trn) {
@@ -315,22 +325,42 @@ export const bpoController = {
         return;
       }
 
+      if (desconciliar) {
+        db.prepare(`
+          UPDATE bank_transactions 
+          SET conciliado = 0,
+              conciliado_em = NULL
+          WHERE id = ?
+        `).run(id);
+        const updated = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id);
+        res.json({ success: true, message: 'Transação desconciliada com sucesso!', data: updated });
+        return;
+      }
+
       const finalCatId = categoria_id || trn.categoria_id;
       const finalInvId = invoice_id !== undefined ? invoice_id : trn.invoice_id;
+      const finalDesc = descricao_custom || trn.descricao_custom || trn.descricao_original;
+      const finalFornecedor = fornecedor_cliente_nome !== undefined ? fornecedor_cliente_nome : trn.fornecedor_cliente_nome;
+      const finalCentroCusto = centro_custo !== undefined ? centro_custo : trn.centro_custo;
+      const finalForma = forma_lancamento || trn.forma_lancamento || 'novo_lancamento';
 
       db.prepare(`
         UPDATE bank_transactions 
         SET conciliado = 1,
             categoria_id = ?,
             invoice_id = ?,
+            descricao_custom = ?,
+            fornecedor_cliente_nome = ?,
+            centro_custo = ?,
+            forma_lancamento = ?,
             observacoes_cliente = COALESCE(?, observacoes_cliente),
             conciliado_em = datetime('now')
         WHERE id = ?
-      `).run(finalCatId, finalInvId, observacoes_cliente || null, id);
+      `).run(finalCatId, finalInvId, finalDesc, finalFornecedor, finalCentroCusto, finalForma, observacoes_cliente || null, id);
 
       // If user wants to save automatic learning rule
       if (learn_rule && finalCatId) {
-        const cleanDesc = trn.descricao_original.split(' ')[0] + ' ' + (trn.descricao_original.split(' ')[1] || '');
+        const cleanDesc = (trn.descricao_original || '').split(' ').slice(0, 2).join(' ');
         const ruleId = uuidv4();
         db.prepare(`
           INSERT INTO reconciliation_rules (id, tenant_id, padrao_descricao, categoria_id, auto_match, created_at)
@@ -340,6 +370,83 @@ export const bpoController = {
 
       const updated = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id);
       res.json({ success: true, message: 'Transação conciliada com sucesso!', data: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 5.1 Seed Sample Bank Transactions for Testing Conta Azul Reconciliation
+  async seedSampleTransactions(req: Request, res: Response): Promise<void> {
+    try {
+      const { company_id } = req.body;
+      if (!company_id) {
+        res.status(400).json({ error: 'company_id é obrigatório' });
+        return;
+      }
+
+      const sampleData = [
+        {
+          data: '2026-08-03',
+          descricao: 'BB CONSÓRCIO - PRESTAÇÃO',
+          tipo: 'DEBITO',
+          valor: 2712.10,
+          documento: 'DOC-88391',
+          categoria_nome: 'Consórcios'
+        },
+        {
+          data: '2026-08-03',
+          descricao: 'BB RENDE FÁCIL - RENDE FACIL',
+          tipo: 'CREDITO',
+          valor: 414.25,
+          documento: 'APL-10293',
+          categoria_nome: 'Rendimento de Aplicações'
+        },
+        {
+          data: '2026-08-04',
+          descricao: 'PIX RECEBIDO - CLIENTE BALCAO',
+          tipo: 'CREDITO',
+          valor: 1350.00,
+          documento: 'PIX-99482',
+          categoria_nome: 'Receita de Vendas no PIX'
+        },
+        {
+          data: '2026-08-05',
+          descricao: 'PAGTO FORNECEDOR - PECAS E FOGOES',
+          tipo: 'DEBITO',
+          valor: 890.50,
+          documento: 'TED-44102',
+          categoria_nome: 'Compras de Mercadorias para Revenda'
+        },
+        {
+          data: '2026-08-06',
+          descricao: 'TARIFA BANCARIA CESTA EMPRESAS',
+          tipo: 'DEBITO',
+          valor: 79.90,
+          documento: 'TAR-0021',
+          categoria_nome: 'Tarifas e Despesas Bancárias'
+        }
+      ];
+
+      const categories = db.prepare('SELECT id, nome, codigo FROM financial_categories').all() as any[];
+      let inserted = 0;
+
+      for (const s of sampleData) {
+        const cat = categories.find(c => c.nome.toLowerCase().includes(s.categoria_nome.toLowerCase()) || s.categoria_nome.toLowerCase().includes(c.nome.toLowerCase())) || categories[0];
+        const trnId = uuidv4();
+        db.prepare(`
+          INSERT INTO bank_transactions (
+            id, company_id, data, descricao_original, tipo, valor, documento,
+            conciliado, categoria_id, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, datetime('now'))
+        `).run(trnId, company_id, s.data, s.descricao, s.tipo, s.valor, s.documento, cat?.id || null);
+        inserted++;
+      }
+
+      res.json({
+        success: true,
+        message: `${inserted} lançamentos bancários de exemplo criados com sucesso no formato Conta Azul!`,
+        inserted
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

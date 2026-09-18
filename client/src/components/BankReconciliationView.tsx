@@ -4,7 +4,8 @@ import { Company } from '../types';
 import { 
   Building2, UploadCloud, Zap, Globe, Wand2, ArrowRight, CheckCircle2, AlertCircle, ArrowUpRight, ArrowDownLeft, 
   Sparkles, FileText, Check, Edit3, Download, RefreshCw, Plus, Filter, Link, Search,
-  BookOpen, FileSpreadsheet, Layers, Paperclip, FileCheck, ArrowRightLeft, DollarSign, Calendar, Upload, FileUp, Copy
+  BookOpen, FileSpreadsheet, Layers, Paperclip, FileCheck, ArrowRightLeft, DollarSign, Calendar, Upload, FileUp, Copy,
+  RotateCcw, ExternalLink, Archive, ChevronDown
 } from 'lucide-react';
 
 const formatCurrency = (val: number) => {
@@ -32,6 +33,8 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
+  const [seedingSample, setSeedingSample] = useState(false);
+  const [companyInvoices, setCompanyInvoices] = useState<any[]>([]);
 
   // Upload Statement Modal State
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -184,56 +187,152 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [isDragging, setIsDragging] = useState(false);
   const [dropzoneMsg, setDropzoneMsg] = useState('');
 
-  // Edit category inline state
-  const [editingTrnId, setEditingTrnId] = useState<string | null>(null);
-  const [selectedCatId, setSelectedCatId] = useState<string>('');
-  const [observacoes, setObservacoes] = useState('');
-  const [learnRule, setLearnRule] = useState(true);
+  // Conta Azul Side-by-Side Row Form State
+  const [rowState, setRowState] = useState<Record<string, {
+    tab?: 'novo' | 'transferencia' | 'buscar';
+    descricao?: string;
+    categoria_id?: string;
+    fornecedor_cliente_nome?: string;
+    centro_custo?: string;
+    repetir?: boolean;
+    invoice_id?: string | null;
+  }>>({});
+
+  const updateRowField = (trnId: string, field: string, val: any) => {
+    setRowState(prev => ({
+      ...prev,
+      [trnId]: {
+        ...(prev[trnId] || {}),
+        [field]: val
+      }
+    }));
+  };
+
+  const updateRowTab = (trnId: string, tab: 'novo' | 'transferencia' | 'buscar') => {
+    updateRowField(trnId, 'tab', tab);
+  };
+
+  // Helper date formatter with weekday
+  const formatDateWithWeekday = (dateStr: string) => {
+    if (!dateStr) return '';
+    const cleanDate = dateStr.split('T')[0];
+    const parts = cleanDate.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [year, month, day] = parts;
+    const d = new Date(Number(year), Number(month) - 1, Number(day));
+    const weekdays = ['Domingo', 'Segunda-Feira', 'Terça-Feira', 'Quarta-Feira', 'Quinta-Feira', 'Sexta-Feira', 'Sábado'];
+    const weekday = weekdays[d.getDay()] || '';
+    return `${day}/${month}/${year} ${weekday}`;
+  };
+
+  const formatCurrencyNumber = (val: number) => {
+    return Math.abs(val || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  // Active company ID ref to prevent cross-company data leakage
+  const activeCompanyIdRef = React.useRef(company.id);
 
   const loadData = async () => {
+    const currentCompanyId = company.id;
     try {
       setLoading(true);
-      const [resTrn, resCat, resChart, resProv] = await Promise.all([
+      const [resTrn, resCat, resChart, resProv, resInv] = await Promise.all([
         api.getBpoTransactions(company.id, filterStatus === 'all' ? undefined : filterStatus),
         api.getBpoCategories(),
         api.getChartOfAccounts(company.id).catch(() => []),
-        api.getProvisions(company.id).catch(() => [])
+        api.getProvisions(company.id).catch(() => []),
+        api.getInvoices({ company_id: company.id, limit: 100 }).catch(() => ({ invoices: [] }))
       ]);
+
+      if (activeCompanyIdRef.current !== currentCompanyId) {
+        return; // Discard stale response from prior company
+      }
 
       setTransactions(resTrn.data || []);
       setSummary(resTrn.summary || {});
       setCategories(resCat || []);
       setChartList(resChart || []);
       setProvisionsList(resProv || []);
+      setCompanyInvoices(resInv.invoices || []);
     } catch (err: any) {
       console.error('Erro ao carregar conciliação:', err);
     } finally {
-      setLoading(false);
+      if (activeCompanyIdRef.current === currentCompanyId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    activeCompanyIdRef.current = company.id;
+    // Immediate state reset on company change to eliminate cross-company contamination
+    setTransactions([]);
+    setSummary({
+      totalCount: 0,
+      reconciledCount: 0,
+      pendingCount: 0,
+      reconciledPercent: 0,
+      totalEntradas: 0,
+      totalSaidas: 0,
+      saldoLiquido: 0
+    });
+    setChartList([]);
+    setProvisionsList([]);
+    setCompanyInvoices([]);
     loadData();
   }, [company.id, filterStatus]);
 
-  const handleReconcile = async (trn: any) => {
+  const handleReconcileQuick = async (trn: any) => {
     try {
       setReconcilingId(trn.id);
-      const catToUse = editingTrnId === trn.id && selectedCatId ? selectedCatId : trn.categoria_id;
-      
+      const row = rowState[trn.id] || {};
+      const catToUse = row.categoria_id || trn.categoria_id;
+      const descToUse = row.descricao || trn.descricao_custom || trn.descricao_original;
+      const fornecedorToUse = row.fornecedor_cliente_nome !== undefined ? row.fornecedor_cliente_nome : trn.fornecedor_cliente_nome;
+      const centroCustoToUse = row.centro_custo !== undefined ? row.centro_custo : trn.centro_custo;
+      const repetirToUse = row.repetir !== undefined ? row.repetir : true;
+      const invToUse = row.invoice_id !== undefined ? row.invoice_id : trn.invoice_id;
+
       await api.reconcileBpoTransaction(trn.id, {
         categoria_id: catToUse,
-        invoice_id: trn.invoice_id,
-        observacoes_cliente: editingTrnId === trn.id ? observacoes : trn.observacoes_cliente,
-        learn_rule: learnRule
+        invoice_id: invToUse,
+        descricao_custom: descToUse,
+        fornecedor_cliente_nome: fornecedorToUse,
+        centro_custo: centroCustoToUse,
+        forma_lancamento: row.tab || 'novo_lancamento',
+        learn_rule: repetirToUse
       });
 
-      setEditingTrnId(null);
-      loadData();
+      await loadData();
     } catch (err: any) {
       alert(`Erro ao conciliar: ${err.message}`);
     } finally {
       setReconcilingId(null);
+    }
+  };
+
+  const handleUnreconcile = async (trnId: string) => {
+    try {
+      setReconcilingId(trnId);
+      await api.reconcileBpoTransaction(trnId, { desconciliar: true });
+      await loadData();
+    } catch (err: any) {
+      alert(`Erro ao desconciliar: ${err.message}`);
+    } finally {
+      setReconcilingId(null);
+    }
+  };
+
+  const handleSeedSample = async () => {
+    try {
+      setSeedingSample(true);
+      const res = await api.seedSampleBpoTransactions(company.id);
+      alert(res.message || 'Lançamentos de exemplo criados com sucesso!');
+      await loadData();
+    } catch (err: any) {
+      alert(`Erro ao criar transações de exemplo: ${err.message}`);
+    } finally {
+      setSeedingSample(false);
     }
   };
 
@@ -526,6 +625,17 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
 
           <div className="flex flex-wrap items-center gap-2.5">
             
+            {/* ⚡ Seed Sample Conta Azul Button */}
+            <button
+              onClick={handleSeedSample}
+              disabled={seedingSample}
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-blue-500/25 flex items-center gap-1.5 cursor-pointer ring-1 ring-blue-400/30"
+              title="Gerar transações de demonstração no formato idêntico ao Conta Azul para testar a conciliação"
+            >
+              <Sparkles className={`w-4 h-4 text-amber-300 ${seedingSample ? 'animate-spin' : ''}`} />
+              <span>{seedingSample ? 'Gerando...' : '⚡ Dados Exemplo (Conta Azul)'}</span>
+            </button>
+
             {/* Open Finance & Webhooks Button */}
             <button
               onClick={handleOpenFinanceModal}
@@ -717,92 +827,392 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         </div>
       </div>
 
-      {/* Transaction List */}
-      <div className="space-y-3">
+      {/* ========================================================================= */}
+      {/* CONTA AZUL SIDE-BY-SIDE RECONCILIATION CARDS (2 TELAS: BANCO x SISTEMA)  */}
+      {/* ========================================================================= */}
+      <div className="space-y-4">
+        {/* Table/List Section Headers */}
+        <div className="hidden lg:grid grid-cols-12 gap-4 px-4 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-900/60 rounded-xl border border-slate-800">
+          <div className="col-span-5 flex items-center justify-between">
+            <span>Lançamentos do Banco (Extrato)</span>
+            <span className="text-slate-500 font-mono">Valor</span>
+          </div>
+          <div className="col-span-2 text-center">
+            <span>Ação</span>
+          </div>
+          <div className="col-span-5 flex items-center justify-between">
+            <span>Lançamentos do Sistema (BPO / ERP)</span>
+            <span className="text-blue-400 font-mono text-[10px]">3 Campos Rápidos</span>
+          </div>
+        </div>
+
         {filteredTransactions.length === 0 ? (
           <div className="p-12 text-center bg-slate-900/50 border border-slate-800 rounded-2xl space-y-3">
             <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
             <h3 className="text-sm font-bold text-white">Nenhum lançamento pendente encontrado</h3>
-            <p className="text-xs text-slate-400">Importe um extrato bancário ou arraste comprovantes para iniciar a conciliação.</p>
+            <p className="text-xs text-slate-400">
+              Importe um extrato bancário ou clique em <strong className="text-blue-400">⚡ Dados Exemplo (Conta Azul)</strong> no topo para testar a conciliação.
+            </p>
           </div>
         ) : (
           filteredTransactions.map((trn) => {
             const isReconciled = trn.conciliado === 1;
             const isCredit = trn.tipo === 'CREDITO';
-            const isEditing = editingTrnId === trn.id;
+            const row = rowState[trn.id] || {};
+            const activeTab = row.tab || 'novo';
 
             return (
               <div 
                 key={trn.id}
                 className={`p-4 rounded-2xl border transition-all ${
                   isReconciled 
-                    ? 'bg-slate-900/40 border-slate-800/80' 
-                    : 'bg-slate-900 border-slate-800 shadow-md hover:border-slate-700'
+                    ? 'bg-slate-900/40 border-emerald-950/40 opacity-90' 
+                    : 'bg-slate-900/95 border-slate-800 shadow-xl hover:border-slate-700'
                 }`}
               >
-                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
                   
-                  {/* Left: Transaction Info */}
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                      isCredit ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    }`}>
-                      {isCredit ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                  {/* ========================================================= */}
+                  {/* CARD 1 (ESQUERDA): LANÇAMENTOS DO BANCO                   */}
+                  {/* ========================================================= */}
+                  <div className="lg:col-span-5 bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2.5">
+                    {/* Top Row: Date & Amount */}
+                    <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-300 font-medium">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{formatDateWithWeekday(trn.data)}</span>
+                      </div>
+                      <div className={`text-sm font-black tracking-tight ${isCredit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {isCredit ? '+' : '-'} R$ {formatCurrencyNumber(trn.valor)}
+                      </div>
                     </div>
 
-                    <div className="min-w-0 space-y-1 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-white truncate">{trn.descricao_original}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{trn.data?.split('-').reverse().join('/')}</span>
-                        {trn.documento && (
-                          <span className="text-[10px] px-1.5 py-0.2 bg-slate-800 text-slate-300 rounded font-mono">
-                            Doc: {trn.documento}
-                          </span>
-                        )}
+                    {/* Bank Description */}
+                    <div>
+                      <div className="text-xs font-bold text-white line-clamp-2" title={trn.descricao_original}>
+                        {trn.descricao_original}
                       </div>
+                      {trn.documento && (
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Doc: <span className="text-slate-300">{trn.documento}</span>
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Matched Invoice or Category */}
-                      <div className="flex items-center gap-2 flex-wrap text-xs">
-                        {trn.invoice_numero ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-medium flex items-center gap-1">
-                            <FileText className="w-3 h-3" />
-                            <span>NF-e #{trn.invoice_numero} • {trn.invoice_emitente || 'SEFAZ'}</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">
-                            Categoria: <strong className="text-slate-200">{trn.categoria_nome || 'A Classificar'}</strong>
-                          </span>
-                        )}
-                        {trn.conta_debito_dominio && (
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            (D: {trn.conta_debito_dominio} / C: {trn.conta_credito_dominio})
-                          </span>
-                        )}
+                    {/* Cliente / Fornecedor info */}
+                    <div className="text-[11px] text-slate-400 space-y-0.5 bg-slate-900/50 p-2 rounded-lg border border-slate-800/50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Favorecido / Pagador:</span>
+                        <span className="text-slate-200 font-medium truncate max-w-[200px]">
+                          {trn.fornecedor_cliente_nome || (trn.invoice_emitente ? trn.invoice_emitente : 'Identificado no extrato')}
+                        </span>
                       </div>
+                      {trn.invoice_numero && (
+                        <div className="flex items-center justify-between text-[10px] text-emerald-400 font-mono pt-0.5">
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            NF-e Vinculada:
+                          </span>
+                          <span>#{trn.invoice_numero}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom Action buttons on Bank side (Manual / Archive / Unreconcile) */}
+                    <div className="flex items-center justify-between pt-1 text-[11px]">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateRowField(trn.id, 'descricao', trn.descricao_original);
+                            updateRowField(trn.id, 'tab', 'novo');
+                          }}
+                          className="text-slate-400 hover:text-blue-400 transition-colors flex items-center gap-1 cursor-pointer font-medium"
+                          title="Copiar texto do banco para o formulário"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Integração manual</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alert(`Transação "${trn.descricao_original}" arquivada com sucesso.`)}
+                          className="text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Arquivar transação"
+                        >
+                          <Archive className="w-3 h-3" />
+                          <span>Arquivar</span>
+                        </button>
+                      </div>
+                      {isReconciled && (
+                        <button
+                          type="button"
+                          onClick={() => handleUnreconcile(trn.id)}
+                          disabled={reconcilingId === trn.id}
+                          className="text-amber-400 hover:text-amber-300 transition-colors text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Desconciliar</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Right: Value & Actions */}
-                  <div className="flex items-center gap-4 shrink-0 w-full lg:w-auto justify-between lg:justify-end">
-                    <div className="text-right">
-                      <div className={`text-sm font-black ${isCredit ? 'text-emerald-400' : 'text-slate-100'}`}>
-                        {isCredit ? '+' : '-'} R$ {Math.abs(trn.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  {/* ========================================================= */}
+                  {/* CENTRO: BOTÃO / STATUS DE CONCILIAÇÃO                     */}
+                  {/* ========================================================= */}
+                  <div className="lg:col-span-2 flex flex-col items-center justify-center py-2">
+                    {isReconciled ? (
+                      <div className="flex flex-col items-center gap-1.5 animate-fade-in text-center">
+                        <div className="px-3.5 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>Conciliado</span>
+                        </div>
+                        {trn.categoria_nome && (
+                          <span className="text-[10px] text-slate-400 font-mono truncate max-w-[130px]">
+                            {trn.categoria_nome}
+                          </span>
+                        )}
+                        {trn.conta_debito_dominio && (
+                          <span className="text-[9px] text-cyan-400/80 font-mono">
+                            D:{trn.conta_debito_dominio} / C:{trn.conta_credito_dominio}
+                          </span>
+                        )}
                       </div>
-                      <span className={`text-[10px] font-bold ${isReconciled ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {isReconciled ? '✅ Conciliado' : '⏳ Pendente'}
-                      </span>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1.5 w-full">
+                        <button
+                          type="button"
+                          onClick={() => handleReconcileQuick(trn)}
+                          disabled={reconcilingId === trn.id}
+                          className="w-full max-w-[140px] py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black rounded-xl shadow-lg shadow-blue-500/25 flex items-center justify-center gap-1.5 transition-all transform active:scale-95 cursor-pointer border border-blue-400/30"
+                        >
+                          <Check className="w-4 h-4 text-white stroke-[3]" />
+                          <span>{reconcilingId === trn.id ? 'Gravando...' : 'Conciliar'}</span>
+                        </button>
+                        <span className="text-[10px] text-slate-400 text-center font-medium">
+                          Grava na Domínio
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ========================================================= */}
+                  {/* CARD 2 (DIREITA): LANÇAMENTOS DO SISTEMA (3 CAMPOS)       */}
+                  {/* ========================================================= */}
+                  <div className="lg:col-span-5 bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-3">
+                    {/* Navigation Tabs */}
+                    <div className="flex items-center gap-1.5 border-b border-slate-800/60 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => updateRowTab(trn.id, 'novo')}
+                        className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                          activeTab === 'novo'
+                            ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Novo lançamento</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateRowTab(trn.id, 'transferencia')}
+                        className={`text-xs font-semibold px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                          activeTab === 'transferencia'
+                            ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <ArrowRightLeft className="w-3 h-3" />
+                        <span>Transferência</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateRowTab(trn.id, 'buscar')}
+                        className={`text-xs font-semibold px-2 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                          activeTab === 'buscar'
+                            ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <Search className="w-3 h-3" />
+                        <span>Buscar lançamento</span>
+                      </button>
                     </div>
 
-                    {!isReconciled && (
-                      <button
-                        onClick={() => handleReconcile(trn)}
-                        disabled={reconcilingId === trn.id}
-                        className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Check className="w-4 h-4" />
-                        <span>{reconcilingId === trn.id ? 'Gravando...' : 'Conciliar'}</span>
-                      </button>
+                    {/* TAB 1: NOVO LANÇAMENTO (3 CAMPOS ESSENCIAIS CONTA AZUL) */}
+                    {activeTab === 'novo' && (
+                      <div className="space-y-2.5">
+                        
+                        {/* 1. Descrição */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                            Descrição <span className="text-rose-400">*</span>
+                          </label>
+                          <div className="relative flex items-center">
+                            <input
+                              type="text"
+                              disabled={isReconciled}
+                              value={row.descricao !== undefined ? row.descricao : (trn.descricao_custom || trn.descricao_original || '')}
+                              onChange={(e) => updateRowField(trn.id, 'descricao', e.target.value)}
+                              placeholder="Ex: Fornecedor de Peças / Venda Balcão"
+                              className="w-full pr-8 pl-2.5 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                            />
+                            <button
+                              type="button"
+                              disabled={isReconciled}
+                              onClick={() => updateRowField(trn.id, 'descricao', trn.descricao_original)}
+                              className="absolute right-2 text-amber-400 hover:text-amber-300 cursor-pointer"
+                              title="Copiar texto original do banco"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2. Categoria & 3. Fornecedor/Cliente (2 colunas) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          
+                          {/* 2. Categoria */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                              Categoria <span className="text-rose-400">*</span>
+                            </label>
+                            <select
+                              disabled={isReconciled}
+                              value={row.categoria_id !== undefined ? row.categoria_id : (trn.categoria_id || '')}
+                              onChange={(e) => updateRowField(trn.id, 'categoria_id', e.target.value)}
+                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none truncate"
+                            >
+                              <option value="">Selecione a categoria...</option>
+                              {categories.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.nome} {c.conta_debito_dominio ? `(${c.conta_debito_dominio}/${c.conta_credito_dominio})` : ''}
+                                </option>
+                              ))}
+                              {chartList.length > 0 && (
+                                <optgroup label="Plano de Contas Domínio">
+                                  {chartList.filter(c => c.classificacao && c.classificacao.length > 2).slice(0, 30).map(c => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.codigo_reduzido ? `[${c.codigo_reduzido}] ` : ''}{c.nome_conta}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </select>
+                          </div>
+
+                          {/* 3. Fornecedor / Cliente */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                              Fornecedor / Cliente
+                            </label>
+                            <input
+                              type="text"
+                              disabled={isReconciled}
+                              value={row.fornecedor_cliente_nome !== undefined ? row.fornecedor_cliente_nome : (trn.fornecedor_cliente_nome || trn.invoice_emitente || '')}
+                              onChange={(e) => updateRowField(trn.id, 'fornecedor_cliente_nome', e.target.value)}
+                              placeholder="Nome do cliente/fornecedor"
+                              className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Optional Centro de Custo & Checkbox Repetir Regra */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                          <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              disabled={isReconciled}
+                              checked={row.repetir !== undefined ? row.repetir : true}
+                              onChange={(e) => updateRowField(trn.id, 'repetir', e.target.checked)}
+                              className="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                            />
+                            <span>🔁 Repetir lançamento (Aprender regra)</span>
+                          </label>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {trn.forma_lancamento || 'novo_lancamento'}
+                          </span>
+                        </div>
+                      </div>
                     )}
+
+                    {/* TAB 2: TRANSFERENCIA */}
+                    {activeTab === 'transferencia' && (
+                      <div className="space-y-2.5 text-xs">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 mb-1">Conta de Origem</label>
+                            <select className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white">
+                              <option>Conta Corrente Principal</option>
+                              <option>Caixa Geral (Dinheiro)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 mb-1">Conta de Destino</label>
+                            <select className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white">
+                              <option>Aplicação CDB / Poupança</option>
+                              <option>Caixa Pequeno</option>
+                            </select>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-400 italic">
+                          Realiza a conciliação entre contas patrimoniais ativas da empresa.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* TAB 3: BUSCAR LANÇAMENTO / NF-E */}
+                    {activeTab === 'buscar' && (
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Search className="w-3.5 h-3.5 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar notas fiscais da empresa..."
+                            className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500"
+                          />
+                        </div>
+
+                        {trn.invoice_numero ? (
+                          <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center justify-between">
+                            <div>
+                              <strong className="block text-white">NF-e #{trn.invoice_numero}</strong>
+                              <span>{trn.invoice_emitente || 'SEFAZ'} • R$ {formatCurrencyNumber(trn.valor)}</span>
+                            </div>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[10px]">
+                              Vínculo Automático
+                            </span>
+                          </div>
+                        ) : companyInvoices.length > 0 ? (
+                          <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                            {companyInvoices.slice(0, 3).map((inv: any) => (
+                              <div
+                                key={inv.id}
+                                onClick={() => {
+                                  updateRowField(trn.id, 'invoice_id', inv.id);
+                                  updateRowField(trn.id, 'descricao', `NF-e #${inv.numero} - ${inv.emitente_nome || inv.destinatario_nome}`);
+                                  updateRowField(trn.id, 'fornecedor_cliente_nome', inv.emitente_nome || inv.destinatario_nome);
+                                }}
+                                className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 cursor-pointer text-[11px] flex items-center justify-between transition-colors"
+                              >
+                                <span className="text-white truncate max-w-[200px]">
+                                  NF-e #{inv.numero} • {inv.emitente_nome || inv.destinatario_nome}
+                                </span>
+                                <span className="text-slate-300 font-mono shrink-0">
+                                  R$ {formatCurrencyNumber(inv.valor_total)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-400">
+                            Nenhuma nota pendente com este valor exato. Utilize os campos na aba "Novo lançamento".
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                   </div>
 
                 </div>

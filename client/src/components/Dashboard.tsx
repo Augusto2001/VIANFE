@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Company, Invoice, InvoiceSummary } from '../types';
 import { api } from '../services/api';
 import { LiveEngineStream } from './LiveEngineStream';
@@ -70,6 +70,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [syncingInvoiceId, setSyncingInvoiceId] = useState<string | null>(null);
   const [manifestingInvoice, setManifestingInvoice] = useState<Invoice | null>(null);
 
+  // Active company ID ref to prevent race condition responses from overwriting current company
+  const activeCompanyIdRef = useRef<string | null>(selectedCompany?.id || null);
+
+  // Immediate reset on company change so stale notes from previous company are never displayed
+  useEffect(() => {
+    activeCompanyIdRef.current = selectedCompany?.id || null;
+    setInvoices([]);
+    setSummary({
+      totalCount: 0,
+      totalValor: 0,
+      valorEntradas: 0,
+      valorSaidas: 0,
+      totalGdriveSynced: 0,
+      totalGdrivePending: 0,
+    });
+    setPage(1);
+    setSelectedIds([]);
+  }, [selectedCompany?.id]);
+
   // Fetch Invoices exclusively for selected company
   const loadInvoices = useCallback(async () => {
     if (!selectedCompany) {
@@ -78,10 +97,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return;
     }
 
+    const currentCompanyId = selectedCompany.id;
+
     try {
       setLoading(true);
       const res = await api.getInvoices({
-        company_id: selectedCompany.id,
+        company_id: currentCompanyId,
         period: period,
         startDate: period === 'custom' ? startDate : undefined,
         endDate: period === 'custom' ? endDate : undefined,
@@ -91,20 +112,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
         page,
         limit: 50,
       });
+
+      // Discard response if user has already switched to another company
+      if (activeCompanyIdRef.current !== currentCompanyId) {
+        return;
+      }
+
       setInvoices(res.invoices);
       if (res.summary) setSummary(res.summary);
       setTotalPages(res.totalPages || 1);
     } catch (err) {
       console.error('Error fetching company invoices:', err);
     } finally {
-      setLoading(false);
+      if (activeCompanyIdRef.current === currentCompanyId) {
+        setLoading(false);
+      }
     }
   }, [selectedCompany, period, startDate, endDate, tipo, status, search, page]);
 
   useEffect(() => {
     setPage(1);
     setSelectedIds([]);
-  }, [selectedCompany?.id, period, startDate, endDate, tipo, status, search]);
+  }, [period, startDate, endDate, tipo, status, search]);
 
   useEffect(() => {
     loadInvoices();
@@ -208,10 +237,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  const formatCnpj = (cnpj: string) => {
+  const formatCnpj = (cnpj?: string) => {
+    if (!cnpj) return '';
     const clean = cnpj.replace(/\D/g, '');
     if (clean.length === 14) {
       return clean.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    }
+    if (clean.length === 11) {
+      return clean.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
     }
     return cnpj;
   };
@@ -252,7 +285,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     <div className="space-y-5 animate-fade-in">
       
       {/* 1. Sleek 1-Line Status Strip (No visual clutter) */}
-      <LiveEngineStream />
+      <LiveEngineStream selectedCompany={selectedCompany} />
 
       {/* 2. Top KPI Summary Cards (Clean Inter typography & balanced contrast) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -545,7 +578,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <th className="py-3 px-3 whitespace-nowrap">Data</th>
                 <th className="py-3 px-3 whitespace-nowrap">Nº / Série</th>
                 <th className="py-3 px-3 whitespace-nowrap">Tipo</th>
-                <th className="py-3 px-4 min-w-[240px]">Emitente / Fornecedor</th>
+                <th className="py-3 px-4 min-w-[240px]">Emitente / Cliente</th>
                 <th className="py-3 px-4 text-right whitespace-nowrap">Valor Total</th>
                 <th className="py-3 px-3 text-center whitespace-nowrap">Status</th>
                 <th className="py-3 px-3 text-center whitespace-nowrap">Drive</th>
@@ -635,13 +668,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </span>
                       </td>
 
-                      {/* Emitente (Expanded with full name and clean font) */}
+                      {/* Emitente / Cliente (Shows supplier for Entradas and customer for Saídas) */}
                       <td className="py-3 px-4">
-                        <div className="font-medium text-slate-100 line-clamp-1" title={inv.emitente_nome}>
-                          {inv.emitente_nome}
+                        <div className="font-medium text-slate-100 line-clamp-1" title={inv.tipo === 'saida' ? (inv.destinatario_nome || (inv.modelo === '65' ? 'Consumidor Final - Venda Balcão' : 'Não informado')) : inv.emitente_nome}>
+                          {inv.tipo === 'saida' ? (inv.destinatario_nome || (inv.modelo === '65' ? 'Consumidor Final - Venda Balcão' : 'Não informado')) : inv.emitente_nome}
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                          {formatCnpj(inv.emitente_cnpj)}
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-1.5">
+                          <span>
+                            {inv.tipo === 'saida'
+                              ? (() => {
+                                  const cEmit = (inv.emitente_cnpj || '').replace(/\D/g, '');
+                                  const cDest = (inv.destinatario_cnpj || '').replace(/\D/g, '');
+                                  const isSame = Boolean(cEmit && cDest && cEmit === cDest);
+                                  if (!inv.destinatario_cnpj || isSame) {
+                                    return inv.modelo === '65' ? 'CPF não informado no cupom' : 'Não informado';
+                                  }
+                                  return formatCnpj(inv.destinatario_cnpj);
+                                })()
+                              : formatCnpj(inv.emitente_cnpj)}
+                          </span>
+                          {inv.tipo === 'saida' && (
+                            <span className="text-[10px] text-slate-500">• Emitente: {inv.emitente_nome?.substring(0, 18)}</span>
+                          )}
                         </div>
                       </td>
 

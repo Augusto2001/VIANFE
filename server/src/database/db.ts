@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { DatabaseSync } from 'node:sqlite';
 import bcrypt from 'bcryptjs';
+import { runJlComercioFullIngestion, JL_COMPANY_ID } from '../services/jlComercioIngestionService.js';
+import { reclassifyAndSanitizeDatabase } from '../utils/fiscalClassifier.js';
 
 const STORAGE_DIR = path.resolve(__dirname, '../../storage');
 const DATA_DIR = path.join(STORAGE_DIR, 'data');
@@ -556,6 +558,20 @@ export function initDatabase() {
     db.exec("ALTER TABLE invoices ADD COLUMN info_adicional TEXT;");
   } catch (_) {}
 
+  // BPO FINANCEIRO: Extensão de colunas para Conciliação Lado a Lado estilo Conta Azul
+  try {
+    db.exec("ALTER TABLE bank_transactions ADD COLUMN fornecedor_cliente_nome TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE bank_transactions ADD COLUMN centro_custo TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE bank_transactions ADD COLUMN descricao_custom TEXT;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE bank_transactions ADD COLUMN forma_lancamento TEXT DEFAULT 'novo_lancamento';");
+  } catch (_) {}
+
   // BPO FINANCEIRO: Tabela de Parcelas / Duplicatas (Contas a Pagar / Contas a Receber)
   db.exec(`
     CREATE TABLE IF NOT EXISTS invoice_installments (
@@ -792,6 +808,39 @@ export function initDatabase() {
 
   // Seed Super App Viacont Portal demo data (tax guides, favorites, clients, receipts)
   seedPortalData();
+
+  // Ingest JL Comercio (Leandro Gomes) 2026 Fiscal Invoices from Google Drive
+  try {
+    const jlCount = db.prepare('SELECT COUNT(*) as c FROM invoices WHERE company_id = ?').get(JL_COMPANY_ID) as { c: number } | undefined;
+    if (!jlCount || jlCount.c < 1442) {
+      console.log(`[JL Comércio Ingest] Verificando notas de 2026 no Google Drive (atual: ${jlCount?.c || 0})...`);
+      runJlComercioFullIngestion(db);
+    }
+  } catch (jlErr: any) {
+    console.warn('[JL Comércio Ingest] Aviso durante ingestão automática:', jlErr.message);
+  }
+
+  // Automated fiscal direction audit & reclassification across all companies
+  try {
+    reclassifyAndSanitizeDatabase(db);
+
+    // Also sanitize server/database.sqlite if it exists
+    const altDbPath = path.resolve(__dirname, '../../database.sqlite');
+    if (fs.existsSync(altDbPath)) {
+      try {
+        const altDb = new DatabaseSync(altDbPath);
+        const hasInvoices = altDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'").get();
+        if (hasInvoices) {
+          console.log('[Reclassificação] Saneando base alternativa database.sqlite...');
+          reclassifyAndSanitizeDatabase(altDb);
+        }
+      } catch (altErr: any) {
+        console.warn('Aviso ao verificar database.sqlite:', altErr.message);
+      }
+    }
+  } catch (reclassErr: any) {
+    console.error('Erro na reclassificação fiscal automática:', reclassErr);
+  }
 
   console.log('✓ SQLite Database tables and indexes initialized successfully.');
 }
@@ -1348,5 +1397,5 @@ export function seedPortalData() {
   }
 }
 
-export { STORAGE_DIR, CERTS_DIR, XMLS_DIR, PDFS_DIR, DATA_DIR };
+export { STORAGE_DIR, CERTS_DIR, XMLS_DIR, PDFS_DIR, DATA_DIR, reclassifyAndSanitizeDatabase };
 

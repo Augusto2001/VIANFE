@@ -45,10 +45,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
-  const formatCnpj = (cnpj: string) => {
+  const formatCnpj = (cnpj?: string) => {
+    if (!cnpj) return '';
     const clean = cnpj.replace(/\D/g, '');
     if (clean.length === 14) {
       return clean.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    }
+    if (clean.length === 11) {
+      return clean.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
     }
     return cnpj;
   };
@@ -64,6 +68,27 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   };
 
   const itens = invoice.itens || [];
+
+  const isNfce = String(invoice.modelo || '') === '65';
+  const rawDest = (invoice.destinatario_cnpj || '').trim();
+  const cleanEmit = (invoice.emitente_cnpj || '').replace(/\D/g, '');
+  const cleanDest = rawDest.replace(/\D/g, '');
+  const isSameAsEmit = Boolean(cleanEmit && cleanDest && cleanEmit === cleanDest);
+  const isNoCpf = !rawDest || isSameAsEmit;
+
+  let destinatarioNomeDisplay = (invoice.destinatario_nome || '').trim();
+  if (isNfce || (!rawDest && !destinatarioNomeDisplay)) {
+    if (!destinatarioNomeDisplay || destinatarioNomeDisplay.toUpperCase().includes('CONSUMIDOR') || isSameAsEmit) {
+      destinatarioNomeDisplay = 'Consumidor Final - Venda Balcão';
+    }
+  }
+  if (!destinatarioNomeDisplay) {
+    destinatarioNomeDisplay = isNfce ? 'Consumidor Final - Venda Balcão' : 'Não informado';
+  }
+
+  const destinatarioCnpjDisplay = isNoCpf
+    ? (isNfce ? 'CPF não informado no cupom' : 'Não informado')
+    : (cleanDest.length === 11 || cleanDest.length === 14 ? formatCnpj(cleanDest) : rawDest);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
@@ -193,13 +218,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </div>
                   <div>
                     <h4 className="font-semibold text-white text-sm">
-                      {invoice.emitente_nome}
+                      {invoice.emitente_nome || 'Empresa Emitente'}
                     </h4>
                     <p className="text-xs font-mono text-slate-400 mt-0.5">
-                      CNPJ: {formatCnpj(invoice.emitente_cnpj)}
+                      CNPJ: {formatCnpj(invoice.emitente_cnpj || '')}
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      UF: <span className="text-slate-200 font-medium">{invoice.emitente_uf || 'N/A'}</span>
+                      UF: <span className="text-slate-200 font-medium">{invoice.emitente_uf || 'BA'}</span>
                     </p>
                   </div>
                 </div>
@@ -212,13 +237,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </div>
                   <div>
                     <h4 className="font-semibold text-white text-sm">
-                      {invoice.destinatario_nome}
+                      {destinatarioNomeDisplay}
                     </h4>
                     <p className="text-xs font-mono text-slate-400 mt-0.5">
-                      CNPJ/CPF: {formatCnpj(invoice.destinatario_cnpj)}
+                      CNPJ/CPF: {destinatarioCnpjDisplay}
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      UF: <span className="text-slate-200 font-medium">{invoice.destinatario_uf || 'N/A'}</span>
+                      UF: <span className="text-slate-200 font-medium">{invoice.destinatario_uf || (isNfce ? (invoice.emitente_uf || 'BA') : 'N/A')}</span>
                     </p>
                   </div>
                 </div>

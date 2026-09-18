@@ -17,19 +17,30 @@ export const TaxAuditView: React.FC<TaxAuditViewProps> = ({ company }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'monofasicos' | 'ncms' | 'cfops' | 'todos'>('monofasicos');
 
+  // Active company ID ref to prevent cross-company race condition responses
+  const activeCompanyIdRef = React.useRef(company.id);
+
   const loadAudit = async () => {
+    const currentCompId = company.id;
     try {
       setLoading(true);
       const res = await api.getTaxAuditSummary(company.id);
+      if (activeCompanyIdRef.current !== currentCompId) {
+        return; // Discard response if user changed companies
+      }
       setData(res);
     } catch (err: any) {
       console.error('Audit load error:', err);
     } finally {
-      setLoading(false);
+      if (activeCompanyIdRef.current === currentCompId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    activeCompanyIdRef.current = company.id;
+    setData(null); // Immediate reset to prevent displaying previous company's audit
     loadAudit();
   }, [company.id]);
 

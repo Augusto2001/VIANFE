@@ -170,6 +170,11 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       return parseResCTe(parsed.resCTe);
     }
 
+    // 3. Check for NFS-e (Nota Fiscal de Serviços Eletrônica Salvador / ABRASF)
+    if (parsed.CompNfse || parsed.Nfse || parsed.ConsultarNfseResposta || parsed.ConsultarLoteRpsResposta || parsed.EnviarLoteRpsResposta || parsed.InfNfse) {
+      return parseNfse(parsed);
+    }
+
     // Support both <nfeProc> (with protocol) and root <NFe>
     const nfeProc = parsed.nfeProc || parsed;
     const nfe = nfeProc.NFe || parsed.NFe;
@@ -181,7 +186,7 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       if (cte && cte.infCte) {
         return parseCte(cte, cteProc.protCTe);
       }
-      throw new Error('Formato XML fiscal não reconhecido (não contém <infNFe>, <infCte>, <resNFe> ou <resCTe>).');
+      throw new Error('Formato XML fiscal não reconhecido (não contém <infNFe>, <infCte>, <resNFe>, <resCTe> ou <Nfse>).');
     }
 
     const infNFe = nfe.infNFe;
@@ -347,7 +352,7 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       serie: String(ide.serie || '1'),
       modelo: String(ide.mod || '55'),
       naturezaOperacao: String(ide.natOp || 'Venda de Mercadorias'),
-      tipoOperacao: String(ide.tpNF || '1') as '0' | '1',
+      tipoOperacao: String(ide.tpNF !== undefined && ide.tpNF !== null ? ide.tpNF : '1') as '0' | '1',
       dataEmissao: ide.dhEmi || ide.dEmi || new Date().toISOString(),
       dataSaidaEntrada: ide.dhSaiEnt || ide.dSaiEnt,
       status: (protNFe.cStat === '100' || !protNFe.cStat) ? 'autorizada' : 'cancelada',
@@ -367,14 +372,19 @@ export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
       },
 
       destinatario: {
-        cnpjCpf: cleanNumeric(dest.CNPJ || dest.CPF || ''),
-        razaoSocial: String(dest.xNome || ''),
+        cnpjCpf: dest.CNPJ || dest.CPF ? cleanNumeric(dest.CNPJ || dest.CPF) : (dest.idEstrangeiro ? String(dest.idEstrangeiro).trim() : ''),
+        razaoSocial: String(
+          dest.xNome || 
+          (String(ide.mod || '55') === '65' || (!cleanNumeric(dest.CNPJ || dest.CPF || '') && !dest.idEstrangeiro)
+            ? 'Consumidor Final - Venda Balcão' 
+            : '')
+        ),
         ie: dest.IE ? String(dest.IE) : undefined,
-        uf: String(destEnder.UF || dest.UF || ''),
-        municipio: String(destEnder.xMun || ''),
-        logradouro: String(destEnder.xLgr || ''),
-        numero: String(destEnder.nro || ''),
-        bairro: String(destEnder.xBairro || ''),
+        uf: String(destEnder.UF || dest.UF || (String(ide.mod || '55') === '65' ? (emitEnder.UF || emit.UF || 'BA') : '')),
+        municipio: String(destEnder.xMun || (String(ide.mod || '55') === '65' ? (emitEnder.xMun || '') : '')),
+        logradouro: String(destEnder.xLgr || (String(ide.mod || '55') === '65' ? 'Venda a Consumidor Final' : '')),
+        numero: String(destEnder.nro || (String(ide.mod || '55') === '65' ? 'S/N' : '')),
+        bairro: String(destEnder.xBairro || (String(ide.mod || '55') === '65' ? 'Balcão' : '')),
         cep: cleanNumeric(destEnder.CEP || ''),
         fone: destEnder.fone ? String(destEnder.fone) : undefined,
       },
@@ -414,7 +424,33 @@ function parseCte(cte: any, protCTe: any): ParsedFiscalInvoice {
   const infCte = cte.infCte || {};
   const ide = infCte.ide || {};
   const emit = infCte.emit || {};
-  const dest = infCte.dest || infCte.rem || {};
+  const rem = infCte.rem || {};
+  const dest = infCte.dest || {};
+  const exped = infCte.exped || {};
+  const receb = infCte.receb || {};
+  const toma3 = ide.toma3 || infCte.toma3 || {};
+  const toma4 = ide.toma4 || infCte.toma4 || {};
+
+  // Resolver o Tomador do Serviço em CT-e:
+  // toma3: 0-Remetente, 1-Expedidor, 2-Recebedor, 3-Destinatário
+  // toma4: 4-Outros (CNPJ/CPF especificado)
+  let tomador: any = {};
+  const tomaCode = String(toma3.toma ?? ide.toma ?? '');
+  if (toma4.CNPJ || toma4.CPF || toma4.xNome) {
+    tomador = toma4;
+  } else if (tomaCode === '0' && (rem.CNPJ || rem.CPF || rem.xNome)) {
+    tomador = rem;
+  } else if (tomaCode === '1' && (exped.CNPJ || exped.CPF || exped.xNome)) {
+    tomador = exped;
+  } else if (tomaCode === '2' && (receb.CNPJ || receb.CPF || receb.xNome)) {
+    tomador = receb;
+  } else if (tomaCode === '3' && (dest.CNPJ || dest.CPF || dest.xNome)) {
+    tomador = dest;
+  } else {
+    tomador = (dest.CNPJ || dest.CPF) ? dest : ((rem.CNPJ || rem.CPF) ? rem : (dest || rem));
+  }
+
+  const tomadorEnder = tomador.enderDest || tomador.enderReme || tomador.enderToma || tomador.enderExped || tomador.enderReceb || {};
   const vPrest = infCte.vPrest || {};
   const prot = protCTe?.infProt || {};
 
@@ -435,16 +471,16 @@ function parseCte(cte: any, protCTe: any): ParsedFiscalInvoice {
     dataEmissao: ide.dhEmi || new Date().toISOString(),
     status: 'autorizada',
     emitente: {
-      cnpjCpf: cleanNumeric(emit.CNPJ || ''),
-      razaoSocial: String(emit.xNome || ''),
+      cnpjCpf: cleanNumeric(emit.CNPJ || emit.CPF || ''),
+      razaoSocial: String(emit.xNome || 'Transportador'),
       uf: String(emit.enderEmit?.UF || ''),
       municipio: String(emit.enderEmit?.xMun || ''),
     },
     destinatario: {
-      cnpjCpf: cleanNumeric(dest.CNPJ || dest.CPF || ''),
-      razaoSocial: String(dest.xNome || ''),
-      uf: String(dest.enderDest?.UF || dest.enderReme?.UF || ''),
-      municipio: String(dest.enderDest?.xMun || dest.enderReme?.xMun || ''),
+      cnpjCpf: cleanNumeric(tomador.CNPJ || tomador.CPF || dest.CNPJ || dest.CPF || rem.CNPJ || rem.CPF || ''),
+      razaoSocial: String(tomador.xNome || dest.xNome || rem.xNome || 'Tomador / Cliente do Frete'),
+      uf: String(tomadorEnder.UF || dest.enderDest?.UF || rem.enderReme?.UF || ''),
+      municipio: String(tomadorEnder.xMun || dest.enderDest?.xMun || rem.enderReme?.xMun || ''),
     },
     totais: {
       valorProdutos: parseFloat(vPrest.vTPrest || '0'),
@@ -578,5 +614,147 @@ function parseResCTe(resCTe: any): ParsedFiscalInvoice {
     protocoloAutorizacao: resCTe.nProt ? String(resCTe.nProt) : undefined,
     dataAutorizacao: resCTe.dhRecbto ? String(resCTe.dhRecbto) : undefined,
     informacoesComplementares: 'Resumo de CT-e obtido via SEFAZ Nacional (Aguardando manifestação / XML completo).',
+  };
+}
+
+export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
+  const nfseRoot = parsedObj.CompNfse?.Nfse || parsedObj.Nfse || 
+                   parsedObj.ConsultarNfseResposta?.ListaNfse?.CompNfse?.Nfse || 
+                   parsedObj.ConsultarLoteRpsResposta?.ListaNfse?.CompNfse?.Nfse || 
+                   parsedObj.EnviarLoteRpsResposta?.ListaNfse?.CompNfse?.Nfse || 
+                   parsedObj;
+  const infNfse = nfseRoot.InfNfse || nfseRoot;
+  
+  const numero = String(infNfse.Numero || infNfse.IdentificacaoRps?.Numero || '0');
+  const codigoVerificacao = String(infNfse.CodigoVerificacao || '');
+  const dataEmissao = infNfse.DataEmissao || new Date().toISOString();
+  
+  const valores = infNfse.ValoresNfse || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.Valores || infNfse.Servico?.Valores || {};
+  const valorServicos = parseFloat(valores.ValorServicos || '0');
+  const valorDeducoes = parseFloat(valores.ValorDeducoes || '0');
+  const valorPis = parseFloat(valores.ValorPis || '0');
+  const valorCofins = parseFloat(valores.ValorCofins || '0');
+  const valorInss = parseFloat(valores.ValorInss || '0');
+  const valorIr = parseFloat(valores.ValorIr || '0');
+  const valorCsll = parseFloat(valores.ValorCsll || '0');
+  const valorIss = parseFloat(valores.ValorIss || '0');
+  const valorLiquido = parseFloat(valores.ValorLiquidoNfse || valores.ValorLiquido || valorServicos || '0');
+  
+  const prestador = infNfse.PrestadorServico || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Prestador || infNfse.Prestador || infNfse.IdentificacaoPrestador || {};
+  const prestadorCnpj = cleanNumeric(
+    prestador.IdentificacaoPrestador?.CpfCnpj?.Cnpj ||
+    prestador.IdentificacaoPrestador?.Cnpj ||
+    prestador.CpfCnpj?.Cnpj ||
+    prestador.Cnpj ||
+    prestador.IdentificacaoPrestador?.CpfCnpj?.Cpf ||
+    prestador.IdentificacaoPrestador?.Cpf ||
+    prestador.CpfCnpj?.Cpf ||
+    prestador.Cpf ||
+    ''
+  );
+  const prestadorNome = String(prestador.RazaoSocial || prestador.NomeFantasia || prestador.xNome || 'Prestador de Serviços');
+  const prestadorEnder = prestador.Endereco || prestador.enderPrest || {};
+  const prestadorUf = String(prestadorEnder.Uf || prestadorEnder.UF || 'BA');
+  
+  const tomador = infNfse.TomadorServico || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Tomador || infNfse.Tomador || infNfse.IdentificacaoTomador || {};
+  const tomadorCnpj = cleanNumeric(
+    tomador.IdentificacaoTomador?.CpfCnpj?.Cnpj ||
+    tomador.IdentificacaoTomador?.CpfCnpj?.Cpf ||
+    tomador.IdentificacaoTomador?.Cnpj ||
+    tomador.IdentificacaoTomador?.Cpf ||
+    tomador.CpfCnpj?.Cnpj ||
+    tomador.CpfCnpj?.Cpf ||
+    tomador.Cnpj ||
+    tomador.Cpf ||
+    ''
+  );
+  const tomadorNome = String(tomador.RazaoSocial || tomador.NomeFantasia || tomador.xNome || 'Tomador de Serviços');
+  const tomadorEnder = tomador.Endereco || tomador.enderToma || {};
+  const tomadorUf = String(tomadorEnder.Uf || tomadorEnder.UF || 'BA');
+
+  const discriminacao = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.Discriminacao || infNfse.Servico?.Discriminacao || infNfse.Discriminacao || 'Prestação de Serviços');
+  const itemServico = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.ItemListaServico || infNfse.Servico?.ItemListaServico || '17.01');
+
+  let chave = '';
+  if (infNfse['@_Id']) {
+    chave = cleanNumeric(infNfse['@_Id']);
+  }
+  if (!chave || chave.length < 10) {
+    chave = `NFSE${prestadorCnpj || '00000000000000'}${numero.padStart(15, '0')}`;
+  }
+
+  const itens: ParsedFiscalItem[] = [
+    {
+      itemNumero: 1,
+      codigo: itemServico,
+      descricao: discriminacao.substring(0, 100),
+      ncm: '',
+      cfop: '',
+      unidade: 'UN',
+      quantidade: 1,
+      valorUnitario: valorServicos,
+      valorTotal: valorServicos,
+      icms: {
+        aliquota: 0,
+        valor: 0
+      },
+      pis: {
+        valor: valorPis
+      },
+      cofins: {
+        valor: valorCofins
+      }
+    }
+  ];
+
+  return {
+    chaveAcesso: chave,
+    numero,
+    serie: String(infNfse.IdentificacaoRps?.Serie || '1'),
+    modelo: 'NFS-e',
+    naturezaOperacao: 'Prestação de Serviços',
+    tipoOperacao: '1',
+    dataEmissao,
+    status: 'autorizada',
+    emitente: {
+      cnpjCpf: prestadorCnpj,
+      razaoSocial: prestadorNome,
+      uf: prestadorUf,
+      municipio: String(prestadorEnder.xMun || prestadorEnder.CodigoMunicipio || 'Salvador'),
+      logradouro: String(prestadorEnder.Endereco || prestadorEnder.xLgr || ''),
+      numero: String(prestadorEnder.Numero || prestadorEnder.nro || ''),
+      bairro: String(prestadorEnder.Bairro || prestadorEnder.xBairro || ''),
+      cep: cleanNumeric(prestadorEnder.Cep || prestadorEnder.CEP || '')
+    },
+    destinatario: {
+      cnpjCpf: tomadorCnpj,
+      razaoSocial: tomadorNome,
+      uf: tomadorUf,
+      municipio: String(tomadorEnder.xMun || tomadorEnder.CodigoMunicipio || ''),
+      logradouro: String(tomadorEnder.Endereco || tomadorEnder.xLgr || ''),
+      numero: String(tomadorEnder.Numero || tomadorEnder.nro || ''),
+      bairro: String(tomadorEnder.Bairro || tomadorEnder.xBairro || ''),
+      cep: cleanNumeric(tomadorEnder.Cep || tomadorEnder.CEP || '')
+    },
+    totais: {
+      valorProdutos: valorServicos,
+      valorFrete: 0,
+      valorSeguro: 0,
+      valorDesconto: valorDeducoes,
+      valorOutrasDespesas: 0,
+      valorTotal: valorLiquido || valorServicos,
+      baseCalculoIcms: 0,
+      valorIcms: 0,
+      baseCalculoIcmsSt: 0,
+      valorIcmsSt: 0,
+      valorPis,
+      valorCofins,
+      valorIpi: 0
+    },
+    itens,
+    duplicatas: [],
+    pagamentos: [],
+    protocoloAutorizacao: codigoVerificacao,
+    informacoesComplementares: discriminacao
   };
 }

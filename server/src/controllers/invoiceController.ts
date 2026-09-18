@@ -6,6 +6,8 @@ import { db, XMLS_DIR, PDFS_DIR } from '../database/db.js';
 import { sefazService } from '../services/sefazService.js';
 import { parseFiscalXml } from '../services/xmlParser.js';
 import { generateDanfePdf } from '../services/danfeGenerator.js';
+import { runJlComercioFullIngestion } from '../services/jlComercioIngestionService.js';
+import { reclassifyAndSanitizeDatabase } from '../utils/fiscalClassifier.js';
 
 export const invoiceController = {
   /**
@@ -420,6 +422,40 @@ export const invoiceController = {
 
       return res.status(400).json({ success: false, message: 'ID da nota ou company_id é obrigatório.' });
     } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  /**
+   * Ingest JL Comercio (Leandro Gomes) 2026 Fiscal Invoices from Google Drive
+   */
+  async ingestJlComercio(req: Request, res: Response) {
+    try {
+      const result = runJlComercioFullIngestion(db);
+      return res.json({
+        success: true,
+        message: 'Ingestão de documentos fiscais de 2026 da JL Comércio realizada com sucesso.',
+        data: result
+      });
+    } catch (err: any) {
+      console.error('Error in ingestJlComercio:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  /**
+   * Reclassify and sanitize all invoices in database according to strict fiscal direction rules
+   */
+  async reclassifyAllInvoices(req: Request, res: Response) {
+    try {
+      const summary = reclassifyAndSanitizeDatabase(db);
+      return res.json({
+        success: true,
+        message: 'Reclassificação fiscal concluída com sucesso. 0 notas invertidas.',
+        data: summary
+      });
+    } catch (err: any) {
+      console.error('Error in reclassifyAllInvoices:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   }

@@ -8,6 +8,7 @@ import { googleDriveService } from './googleDriveService.js';
 import { sefazDfeClient } from './sefazDfeClient.js';
 import { cleanNumeric } from '../utils/crypto.js';
 import { getInvoiceStoragePaths } from '../utils/driveFolderMatcher.js';
+import { classifyFiscalDirection, isSameCompany } from '../utils/fiscalClassifier.js';
 
 export class SefazService {
   /**
@@ -27,40 +28,66 @@ export class SefazService {
     const parsed = parseFiscalXml(xmlString);
     const companyCnpjClean = cleanNumeric(company.cnpj);
     const emitenteCnpjClean = cleanNumeric(parsed.emitente.cnpjCpf);
+    const destinatarioCnpjClean = cleanNumeric(parsed.destinatario.cnpjCpf);
     let actualCompany = company;
     let actualCompanyId = companyId;
 
-    // Fill destinatario if empty (e.g. resNFe / resCTe summary from SEFAZ DFe)
-    if (!parsed.destinatario.cnpjCpf || parsed.destinatario.cnpjCpf === '') {
-      parsed.destinatario.cnpjCpf = actualCompany.cnpj;
-      parsed.destinatario.razaoSocial = actualCompany.razao_social;
-      parsed.destinatario.uf = actualCompany.uf;
-    }
+    // Apenas se a empresa ativa NÃO for parte na nota (nem emitente nem destinatária),
+    // verifica se outra empresa cadastrada é o emitente ou destinatário legítimo (ex: upload em empresa incorreta)
+    const isCurrentCompanyParty = isSameCompany(emitenteCnpjClean, companyCnpjClean) ||
+                                  isSameCompany(destinatarioCnpjClean, companyCnpjClean);
 
-    const destinatarioCnpjClean = cleanNumeric(parsed.destinatario.cnpjCpf);
-    let tipo: 'entrada' | 'saida' = 'entrada';
-
-    if (companyCnpjClean === destinatarioCnpjClean) {
-      tipo = 'entrada';
-    } else if (companyCnpjClean === emitenteCnpjClean) {
-      tipo = 'saida';
-    } else {
-      // Check if another registered company matches the destinatário (compra) or emitente (venda)
-      const foundDest = destinatarioCnpjClean ? db.prepare('SELECT * FROM companies WHERE cnpj LIKE ?').get(`%${destinatarioCnpjClean}%`) as any : null;
-      const foundEmit = emitenteCnpjClean ? db.prepare('SELECT * FROM companies WHERE cnpj LIKE ?').get(`%${emitenteCnpjClean}%`) as any : null;
-
-      if (foundDest) {
-        actualCompany = foundDest;
-        actualCompanyId = foundDest.id;
-        tipo = 'entrada';
-      } else if (foundEmit) {
-        actualCompany = foundEmit;
-        actualCompanyId = foundEmit.id;
-        tipo = 'saida';
-      } else {
-        tipo = parsed.tipoOperacao === '1' ? 'saida' : 'entrada';
+    if (!isCurrentCompanyParty) {
+      const allCompanies = db.prepare('SELECT id, cnpj, razao_social, uf FROM companies').all() as any[];
+      if (emitenteCnpjClean) {
+        const foundEmit = allCompanies.find(c => isSameCompany(c.cnpj, emitenteCnpjClean));
+        if (foundEmit) {
+          actualCompany = foundEmit;
+          actualCompanyId = foundEmit.id;
+        }
+      }
+      if (actualCompanyId === companyId && destinatarioCnpjClean) {
+        const foundDest = allCompanies.find(c => isSameCompany(c.cnpj, destinatarioCnpjClean));
+        if (foundDest) {
+          actualCompany = foundDest;
+          actualCompanyId = foundDest.id;
+        }
       }
     }
+
+    const actualCompanyCnpjClean = cleanNumeric(actualCompany.cnpj);
+
+    // Fill destinatario only for resNFe / resCTe summaries queried by SEFAZ DFe for an incoming invoice
+    if (!parsed.destinatario.cnpjCpf || parsed.destinatario.cnpjCpf === '') {
+      if (source === 'sefaz_dfe' && emitenteCnpjClean !== actualCompanyCnpjClean) {
+        parsed.destinatario.cnpjCpf = actualCompany.cnpj;
+        parsed.destinatario.razaoSocial = actualCompany.razao_social;
+        parsed.destinatario.uf = actualCompany.uf;
+      } else {
+        parsed.destinatario.cnpjCpf = '';
+        if (!parsed.destinatario.razaoSocial || parsed.destinatario.razaoSocial.trim() === '') {
+          parsed.destinatario.razaoSocial = 'Consumidor Final - Venda Balcão';
+        }
+      }
+    }
+
+    // Deterministic fiscal direction classification:
+    // - tpNF === '0' -> tipo = 'entrada' (emissão própria de entrada para devolução/remessa)
+    // - emitente === company.cnpj & tpNF === '1' -> tipo = 'saida' (Venda / Faturamento)
+    // - destinatario === company.cnpj & tpNF === '1' -> tipo = 'entrada' (Compra / Fornecedor)
+    // - Eliminates any logic classifying notes emitted by the company as 'entrada'
+    const classification = classifyFiscalDirection(
+      actualCompany.cnpj,
+      parsed.emitente.cnpjCpf,
+      parsed.destinatario.cnpjCpf,
+      parsed.tipoOperacao,
+      parsed.modelo,
+      parsed.destinatario.razaoSocial
+    );
+
+    const tipo = classification.tipo;
+    parsed.destinatario.cnpjCpf = classification.destinatarioCnpj;
+    parsed.destinatario.razaoSocial = classification.destinatarioNome;
 
     // Build file paths targeting G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS or local fallback
     const { xmlFilePath, pdfFilePath } = getInvoiceStoragePaths(

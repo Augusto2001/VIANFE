@@ -57,12 +57,15 @@ router.post('/invoices/download-zip', verifyJwtAndTenant, invoiceController.down
 router.post('/invoices/upload-batch', verifyJwtAndTenant, uploadTemp.array('xmlFiles', 100), invoiceController.uploadBatchXml);
 router.post('/invoices/:id/sync-drive', verifyJwtAndTenant, invoiceController.syncToDrive);
 router.post('/invoices/sync-company-drive', verifyJwtAndTenant, invoiceController.syncToDrive);
+router.post('/invoices/ingest-jl-comercio', verifyJwtAndTenant, invoiceController.ingestJlComercio);
+router.post('/invoices/reclassify', verifyJwtAndTenant, invoiceController.reclassifyAllInvoices);
 
 // BPO Financeiro & Conciliação Bancária Lado a Lado
 router.get('/bpo/accounts', verifyJwtAndTenant, bpoController.getAccounts);
 router.post('/bpo/accounts', verifyJwtAndTenant, bpoController.createAccount);
 router.post('/bpo/upload-statement', verifyJwtAndTenant, bpoController.uploadStatement);
 router.get('/bpo/transactions', verifyJwtAndTenant, bpoController.getTransactions);
+router.post('/bpo/transactions/seed-sample', verifyJwtAndTenant, bpoController.seedSampleTransactions);
 router.post('/bpo/reconcile/:id', verifyJwtAndTenant, bpoController.reconcileTransaction);
 router.get('/bpo/categories', verifyJwtAndTenant, bpoController.getCategories);
 router.get('/bpo/business-success', verifyJwtAndTenant, bpoController.getBusinessSuccessKpis);

@@ -2,7 +2,7 @@ import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
 import { ParsedFiscalInvoice } from './xmlParser.js';
-import { formatCNPJ, formatChaveAcesso } from '../utils/crypto.js';
+import { formatCNPJ, formatChaveAcesso, cleanNumeric } from '../utils/crypto.js';
 import { PDFS_DIR } from '../database/db.js';
 
 export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?: string): Promise<string> {
@@ -147,8 +147,13 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
 
     // Box 2: DANFE Central Box (Middle)
     doc.rect(left + 225, y, 105, headerHeight).stroke('#000000');
-    doc.fontSize(11).font('Helvetica-Bold').text('DANFE', left + 225, y + 4, { align: 'center', width: 105 });
-    doc.fontSize(5).font('Helvetica').text('DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA', left + 227, y + 16, { align: 'center', width: 101 });
+    doc.fontSize(11).font('Helvetica-Bold').text(String(invoice.modelo || '') === '65' ? 'DANFE NFC-e' : 'DANFE', left + 225, y + 4, { align: 'center', width: 105 });
+    doc.fontSize(5).font('Helvetica').text(
+      String(invoice.modelo || '') === '65'
+        ? 'DOCUMENTO AUXILIAR DA NOTA FISCAL DE CONSUMIDOR ELETRÔNICA'
+        : 'DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRÔNICA',
+      left + 227, y + 16, { align: 'center', width: 101 }
+    );
     
     // Indicador 0 - Entrada / 1 - Saída com checkbox nacional
     const isSaida = invoice.tipoOperacao === '1';
@@ -227,14 +232,40 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     doc.fontSize(5.5).font('Helvetica-Bold').text('DESTINATÁRIO / REMETENTE', left, y);
     y += 7;
 
+    const isNfce = String(invoice.modelo || '') === '65';
+    const rawDestDoc = (invoice.destinatario?.cnpjCpf || '').trim();
+    const emitCnpjClean = cleanNumeric(invoice.emitente?.cnpjCpf || '');
+    const destCnpjClean = cleanNumeric(rawDestDoc);
+    const isSameAsEmit = Boolean(emitCnpjClean && destCnpjClean && emitCnpjClean === destCnpjClean);
+    const isNoCpf = !rawDestDoc || isSameAsEmit;
+
+    let destRazaoSocial = (invoice.destinatario?.razaoSocial || '').trim();
+    if (isNfce || (!rawDestDoc && !destRazaoSocial)) {
+      if (!destRazaoSocial || destRazaoSocial.toUpperCase().includes('CONSUMIDOR') || isSameAsEmit) {
+        destRazaoSocial = 'Consumidor Final - Venda Balcão';
+      }
+    }
+    if (!destRazaoSocial) {
+      destRazaoSocial = isNfce ? 'Consumidor Final - Venda Balcão' : 'Não informado';
+    }
+
+    let destCpfCnpjFormatted = '';
+    if (isNoCpf) {
+      destCpfCnpjFormatted = isNfce ? 'CPF não informado no cupom' : 'Não informado';
+    } else if (destCnpjClean.length === 11 || destCnpjClean.length === 14) {
+      destCpfCnpjFormatted = formatCNPJ(destCnpjClean);
+    } else {
+      destCpfCnpjFormatted = rawDestDoc;
+    }
+
     const destRow1 = 18;
     doc.rect(left, y, 360, destRow1).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('NOME / RAZÃO SOCIAL', left + 3, y + 2);
-    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.destinatario.razaoSocial.toUpperCase(), left + 3, y + 8, { width: 354, ellipsis: true });
+    doc.fontSize(6.5).font('Helvetica-Bold').text(destRazaoSocial.toUpperCase(), left + 3, y + 8, { width: 354, ellipsis: true });
 
     doc.rect(left + 360, y, 120, destRow1).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('CNPJ / CPF', left + 363, y + 2);
-    doc.fontSize(6.5).font('Helvetica-Bold').text(formatCNPJ(invoice.destinatario.cnpjCpf), left + 363, y + 8);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(destCpfCnpjFormatted, left + 363, y + 8);
 
     doc.rect(left + 480, y, width - 480, destRow1).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('DATA DA EMISSÃO', left + 483, y + 2);
@@ -245,16 +276,18 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     const destRow2 = 18;
     doc.rect(left, y, 260, destRow2).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('ENDEREÇO', left + 3, y + 2);
-    const destAddr = `${invoice.destinatario.logradouro || ''}, ${invoice.destinatario.numero || 'S/N'}`;
+    const destAddr = invoice.destinatario?.logradouro
+      ? `${invoice.destinatario.logradouro}, ${invoice.destinatario.numero || 'S/N'}`
+      : (isNfce || isNoCpf ? 'Venda a Consumidor Final / Presencial' : 'Não informado');
     doc.fontSize(6).font('Helvetica-Bold').text(destAddr, left + 3, y + 8, { width: 254, ellipsis: true });
 
     doc.rect(left + 260, y, 130, destRow2).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('BAIRRO / DISTRITO', left + 263, y + 2);
-    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.bairro || '', left + 263, y + 8, { width: 124, ellipsis: true });
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario?.bairro || (isNfce || isNoCpf ? 'Balcão' : ''), left + 263, y + 8, { width: 124, ellipsis: true });
 
     doc.rect(left + 390, y, 90, destRow2).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('CEP', left + 393, y + 2);
-    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.cep || '', left + 393, y + 8);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario?.cep || (isNfce || isNoCpf ? (invoice.emitente?.cep || '') : ''), left + 393, y + 8);
 
     doc.rect(left + 480, y, width - 480, destRow2).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('DATA SAÍDA / ENTRADA', left + 483, y + 2);
@@ -265,19 +298,19 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
     const destRow3 = 18;
     doc.rect(left, y, 200, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('MUNICÍPIO', left + 3, y + 2);
-    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.municipio || '', left + 3, y + 8);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario?.municipio || (isNfce || isNoCpf ? (invoice.emitente?.municipio || '') : ''), left + 3, y + 8);
 
     doc.rect(left + 200, y, 90, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('FONE / FAX', left + 203, y + 2);
-    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.fone || '', left + 203, y + 8);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario?.fone || '', left + 203, y + 8);
 
     doc.rect(left + 290, y, 30, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('UF', left + 293, y + 2);
-    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.destinatario.uf || '', left + 293, y + 8);
+    doc.fontSize(6.5).font('Helvetica-Bold').text(invoice.destinatario?.uf || (isNfce || isNoCpf ? (invoice.emitente?.uf || 'BA') : ''), left + 293, y + 8);
 
     doc.rect(left + 320, y, 160, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('INSCRIÇÃO ESTADUAL', left + 323, y + 2);
-    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario.ie || 'ISENTO', left + 323, y + 8);
+    doc.fontSize(6).font('Helvetica-Bold').text(invoice.destinatario?.ie || (isNfce || isNoCpf ? 'ISENTO / NÃO CONTRIBUINTE' : 'ISENTO'), left + 323, y + 8);
 
     doc.rect(left + 480, y, width - 480, destRow3).stroke('#000000');
     doc.fontSize(4.5).font('Helvetica').text('HORA DA SAÍDA', left + 483, y + 2);
@@ -663,7 +696,7 @@ export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?
 
       // Box 2: DANFE Central Box
       doc.rect(left + 225, pageY, 105, followHeaderH).stroke('#000000');
-      doc.fontSize(10).font('Helvetica-Bold').text('DANFE', left + 225, pageY + 3, { align: 'center', width: 105 });
+      doc.fontSize(10).font('Helvetica-Bold').text(String(invoice.modelo || '') === '65' ? 'DANFE NFC-e' : 'DANFE', left + 225, pageY + 3, { align: 'center', width: 105 });
       doc.fontSize(5.5).font('Helvetica').text(`Nº ${invoice.numero || '0'} | SÉRIE ${invoice.serie || '1'}`, left + 225, pageY + 16, { align: 'center', width: 105 });
       doc.fontSize(6).font('Helvetica-Bold').text(`FOLHA ${pageNum}/${totalPages}`, left + 225, pageY + 28, { align: 'center', width: 105 });
 

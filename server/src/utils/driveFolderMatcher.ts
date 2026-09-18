@@ -3,10 +3,31 @@ import path from 'path';
 
 export const G_DRIVE_BASE_PATH = 'G:\\Meu drive\\CLIENTES VIACONT\\CLIENTES ATIVOS';
 
+export interface FolderAliasMapping {
+  cnpj?: string;
+  aliases: string[];
+  folderName: string;
+}
+
+export const KNOWN_FOLDER_ALIASES: FolderAliasMapping[] = [
+  {
+    cnpj: '73472235000150',
+    aliases: [
+      'JL COMERCIO',
+      'JL COMERCIO E VENDAS',
+      'JL COMERCIO E VENDAS DE PECAS',
+      'JL COMERCIO E VENDAS DE PECAS E SERVICOS LTDA',
+      'LEANDRO GOMES',
+      'LEANDRO GOMES NOGUEIRA'
+    ],
+    folderName: 'LEANDRO GOMES NOGUEIRA (C)-26 (SN) ( 42 )'
+  }
+];
+
 /**
- * Enhanced folder matcher that finds client folder by CNPJ or fuzzy name matching.
+ * Enhanced folder matcher that finds client folder by CNPJ, known aliases, or fuzzy name matching.
  */
-export function getClientFolderInGDrive(companyName: string, cnpj?: string): string | null {
+export function getClientFolderInGDrive(companyName: string, cnpj?: string, nomeFantasia?: string): string | null {
   if (!fs.existsSync(G_DRIVE_BASE_PATH)) {
     return null;
   }
@@ -14,8 +35,29 @@ export function getClientFolderInGDrive(companyName: string, cnpj?: string): str
   try {
     const existingFolders = fs.readdirSync(G_DRIVE_BASE_PATH);
     const cleanCnpj = (cnpj || '').replace(/\D/g, '');
+    const norm = (str: string) => (str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const targetName = norm(companyName);
+    const targetFantasia = norm(nomeFantasia || '');
 
-    // 1. Try matching by clean CNPJ
+    // 0. Check Known Folder Aliases (e.g. JL Comércio -> LEANDRO GOMES NOGUEIRA)
+    const matchedAlias = KNOWN_FOLDER_ALIASES.find(a => {
+      if (cleanCnpj && a.cnpj && cleanCnpj === a.cnpj) return true;
+      if (a.aliases.some(alias => targetName.includes(norm(alias)) || (targetFantasia && targetFantasia.includes(norm(alias))))) return true;
+      return false;
+    });
+
+    if (matchedAlias) {
+      const aliasFolder = existingFolders.find(f => norm(f) === norm(matchedAlias.folderName) || norm(f).includes(norm(matchedAlias.folderName)));
+      if (aliasFolder) {
+        return path.join(G_DRIVE_BASE_PATH, aliasFolder);
+      }
+      const directPath = path.join(G_DRIVE_BASE_PATH, matchedAlias.folderName);
+      if (fs.existsSync(directPath)) {
+        return directPath;
+      }
+    }
+
+    // 1. Try matching by clean CNPJ in folder name
     if (cleanCnpj && cleanCnpj.length === 14) {
       const matchByCnpj = existingFolders.find(f => f.replace(/\D/g, '').includes(cleanCnpj));
       if (matchByCnpj) {
@@ -24,8 +66,6 @@ export function getClientFolderInGDrive(companyName: string, cnpj?: string): str
     }
 
     // 2. Fuzzy name matching
-    const norm = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-    const targetName = norm(companyName);
     const words = targetName.split(/\s+/).filter(w => w.length > 3 && !['LTDA', 'EIRELI', 'ME', 'EPP', 'COMERCIO', 'SERVICOS', 'CONVENIENCIA'].includes(w));
 
     let bestMatch: string | null = null;
@@ -50,7 +90,7 @@ export function getClientFolderInGDrive(companyName: string, cnpj?: string): str
     }
 
     // 3. Fallback to first word match
-    const firstWord = norm(companyName).split(/\s+/)[0];
+    const firstWord = targetName.split(/\s+/)[0];
     const matchByFirstWord = existingFolders.find(f => norm(f).includes(firstWord));
     if (matchByFirstWord) {
       return path.join(G_DRIVE_BASE_PATH, matchByFirstWord);
@@ -68,8 +108,8 @@ export function getClientFolderInGDrive(companyName: string, cnpj?: string): str
 }
 
 /**
- * Ensures SETOR FISCAL\NFe folder exists inside the client folder.
- * If a folder named "NF" exists inside SETOR FISCAL, renames it to "NFe".
+ * Ensures SETOR FISCAL\NFe or SETOR FISCAL\NF folder exists inside the client folder.
+ * Supports both "NF" and "NFe" subdirectories seamlessly.
  */
 export function getSetorFiscalNfeDir(clientFolderPath: string): string {
   let setorFiscalDir = path.join(clientFolderPath, 'SETOR FISCAL');
@@ -79,35 +119,44 @@ export function getSetorFiscalNfeDir(clientFolderPath: string): string {
     if (existingSetor) {
       setorFiscalDir = path.join(clientFolderPath, existingSetor);
     } else {
-      fs.mkdirSync(setorFiscalDir, { recursive: true });
+      try {
+        fs.mkdirSync(setorFiscalDir, { recursive: true });
+      } catch (e: any) {
+        return clientFolderPath;
+      }
     }
   }
 
-  const setorItems = fs.readdirSync(setorFiscalDir);
-  const nfFolder = setorItems.find(i => i.trim() === 'NF' || i.trim() === 'nf');
-  const nfeFolder = setorItems.find(i => i.trim().toUpperCase() === 'NFE');
+  if (!fs.existsSync(setorFiscalDir)) {
+    return clientFolderPath;
+  }
 
-  if (nfFolder && !nfeFolder) {
-    const oldNfPath = path.join(setorFiscalDir, nfFolder);
-    const newNfePath = path.join(setorFiscalDir, 'NFe');
-    try {
-      fs.renameSync(oldNfPath, newNfePath);
-      console.log(`[DriveMatcher] Pasta "${nfFolder}" renomeada para "NFe" em ${setorFiscalDir}`);
-    } catch (e: any) {
-      console.warn(`[DriveMatcher] Não foi possível renomear NF para NFe: ${e.message}`);
-    }
+  const setorItems = fs.readdirSync(setorFiscalDir);
+  const nfeFolder = setorItems.find(i => i.trim().toUpperCase() === 'NFE');
+  const nfFolder = setorItems.find(i => i.trim().toUpperCase() === 'NF');
+
+  if (nfeFolder) {
+    return path.join(setorFiscalDir, nfeFolder);
+  }
+
+  if (nfFolder) {
+    return path.join(setorFiscalDir, nfFolder);
   }
 
   const finalNfeDir = path.join(setorFiscalDir, 'NFe');
   if (!fs.existsSync(finalNfeDir)) {
-    fs.mkdirSync(finalNfeDir, { recursive: true });
+    try {
+      fs.mkdirSync(finalNfeDir, { recursive: true });
+    } catch (e: any) {
+      return setorFiscalDir;
+    }
   }
 
   return finalNfeDir;
 }
 
 /**
- * Returns storage paths targeting G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS\[CLIENTE]\SETOR FISCAL\NFe\[ANO]\[MÊS]\[Entradas|Saidas]\
+ * Returns storage paths targeting G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS\[CLIENTE]\SETOR FISCAL\[NFe|NF]\[ANO]\[MÊS]\[Entradas|Saidas]\
  */
 export function getInvoiceStoragePaths(
   companyName: string,
@@ -115,14 +164,15 @@ export function getInvoiceStoragePaths(
   chaveAcesso: string,
   fallbackStorageDir: string,
   cnpj?: string,
-  tipo: 'entrada' | 'saida' = 'entrada'
+  tipo: 'entrada' | 'saida' = 'entrada',
+  nomeFantasia?: string
 ): { xmlFilePath: string; pdfFilePath: string } {
   const emissionDate = new Date(dataEmissaoStr || Date.now());
   const year = String(emissionDate.getFullYear());
   const month = String(emissionDate.getMonth() + 1).padStart(2, '0');
   const subFolder = tipo === 'saida' ? 'Saidas' : 'Entradas';
 
-  const gDriveClientFolder = getClientFolderInGDrive(companyName, cnpj);
+  const gDriveClientFolder = getClientFolderInGDrive(companyName, cnpj, nomeFantasia);
 
   if (gDriveClientFolder && fs.existsSync(gDriveClientFolder)) {
     const setorFiscalNfe = getSetorFiscalNfeDir(gDriveClientFolder);
@@ -138,13 +188,17 @@ export function getInvoiceStoragePaths(
       pdfDir = path.join(setorFiscalNfe, year, month, 'PDFs');
     }
 
-    fs.mkdirSync(xmlDir, { recursive: true });
-    fs.mkdirSync(pdfDir, { recursive: true });
+    try {
+      fs.mkdirSync(xmlDir, { recursive: true });
+      fs.mkdirSync(pdfDir, { recursive: true });
 
-    return {
-      xmlFilePath: path.join(xmlDir, `${chaveAcesso}.xml`),
-      pdfFilePath: path.join(pdfDir, `DANFE_${chaveAcesso}.pdf`),
-    };
+      return {
+        xmlFilePath: path.join(xmlDir, `${chaveAcesso}.xml`),
+        pdfFilePath: path.join(pdfDir, `DANFE_${chaveAcesso}.pdf`),
+      };
+    } catch (err: any) {
+      console.warn(`[DriveMatcher] Aviso ao gravar pastas em G: ${err.message}. Usando armazenamento padrão.`);
+    }
   }
 
   // Fallback to local storage/xmls/EMPRESA/ANO/MES/SUBFOLDER
