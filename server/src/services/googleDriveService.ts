@@ -183,6 +183,7 @@ export class GoogleDriveService {
         fields: 'id, webViewLink',
       });
 
+      if (!res.data.id) throw new Error('Google Drive não retornou ID; backup não confirmado.');
       return {
         fileId: res.data.id,
         webViewLink: res.data.webViewLink,
