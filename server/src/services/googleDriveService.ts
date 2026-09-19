@@ -46,10 +46,10 @@ export class GoogleDriveService {
   public getStatus() {
     return {
       isConfigured: this.isConfigured,
-      mode: this.isConfigured ? 'google_api' : 'simulation_ready',
+      mode: this.isConfigured ? 'google_api' : 'not_configured',
       message: this.isConfigured
-        ? 'Google Drive API conectado e ativo.'
-        : 'Google Drive em modo operacional (Configure suas credenciais Google Cloud ou use a pasta local/virtual).'
+        ? 'Credenciais Google Drive configuradas; conexão validada a cada operação.'
+        : 'Google Drive não configurado; backups permanecem pendentes.'
     };
   }
 
@@ -59,7 +59,7 @@ export class GoogleDriveService {
   public saveCredentials(jsonContent: string) {
     try {
       const parsed = JSON.parse(jsonContent);
-      if (!parsed.client_email && !parsed.web && !parsed.installed) {
+      if (!parsed.client_email || !parsed.private_key) {
         throw new Error('Formato JSON de credencial Google inválido.');
       }
       
@@ -82,12 +82,7 @@ export class GoogleDriveService {
    */
   public async listFolders(parentId: string = 'root'): Promise<DriveFolder[]> {
     if (!this.isConfigured || !this.driveClient) {
-      // Return predefined/mockable folders for UI testing before credentials upload
-      return [
-        { id: 'folder_contabilidade_root', name: '📁 Contabilidade - Notas Fiscais 2026', mimeType: 'application/vnd.google-apps.folder' },
-        { id: 'folder_arquivos_fiscais', name: '📁 Documentos Fiscais Clientes (Drive)', mimeType: 'application/vnd.google-apps.folder' },
-        { id: 'folder_backup_dfe', name: '📁 Backup Automático XML_PDF', mimeType: 'application/vnd.google-apps.folder' }
-      ];
+      throw new Error('Google Drive não configurado; nenhuma pasta foi consultada.');
     }
 
     try {
@@ -113,6 +108,7 @@ export class GoogleDriveService {
     month: string,
     subType: 'XMLs' | 'PDFs'
   ): Promise<string> {
+    if (!baseFolderId || /^(virtual_|folder_)/.test(baseFolderId)) throw new Error('Pasta real do Drive não configurada.');
     const cleanCompanyName = companyName.replace(/[\/\\:*?"<>|]/g, '_').trim();
 
     if (!this.isConfigured || !this.driveClient) {
@@ -153,6 +149,7 @@ export class GoogleDriveService {
       fields: 'id',
     });
 
+    if (!created.data.id) throw new Error('Google Drive não confirmou criação da pasta.');
     return created.data.id;
   }
 
@@ -165,24 +162,20 @@ export class GoogleDriveService {
     folderId: string,
     mimeType: string
   ): Promise<{ fileId: string; webViewLink?: string }> {
+    if (!folderId || /^(virtual_|folder_)/.test(folderId)) throw new Error('Pasta real do Drive não configurada.');
     if (!fs.existsSync(localFilePath)) {
       throw new Error(`Arquivo local não encontrado: ${localFilePath}`);
     }
 
     if (!this.isConfigured || !this.driveClient) {
-      // Simulate successful upload and return virtual id
-      const virtualId = `gdrive_sync_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      return {
-        fileId: virtualId,
-        webViewLink: `https://drive.google.com/file/d/${virtualId}/view`
-      };
+      throw new Error('Google Drive não configurado; backup pendente.');
     }
 
     try {
       const res = await this.driveClient.files.create({
         requestBody: {
           name: fileName,
-          parents: folderId.startsWith('virtual_') ? undefined : [folderId],
+          parents: [folderId],
         },
         media: {
           mimeType,
