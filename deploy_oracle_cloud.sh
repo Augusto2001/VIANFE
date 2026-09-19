@@ -1,73 +1,30 @@
-#!/bin/bash
-# ==============================================================================
-# SCRIPT OFICIAL DE DEPLOY — VIANFE POR VIACONT (ORACLE CLOUD / UBUNTU 24.04)
-# ==============================================================================
-
-set -e
-
-echo "🚀 INICIANDO DEPLOY DO VIANFE NA ORACLE CLOUD..."
-
-# 1. Atualizar Pacotes do Sistema
-echo "1. Atualizando pacotes do sistema Ubuntu..."
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git nginx certbot python3-certbot-nginx build-essential
-
-# 2. Instalar Node.js 24 LTS e PM2
-echo "2. Instalando Node.js 24 LTS e PM2..."
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt install -y nodejs
-sudo npm install -g pm2
-
-# 3. Configurar Diretório da Aplicação
-echo "3. Preparando diretório da aplicação..."
-sudo mkdir -p /var/www/vianfe
-sudo chown -R $USER:$USER /var/www/vianfe
-
-# 4. Instalar Dependências e Fazer Build do Projeto
-echo "4. Instalando dependências e realizando build..."
-cd /var/www/vianfe
-npm install
-npm run build
-
-# 5. Iniciar Serviços com PM2 Process Manager
-echo "5. Iniciando API Backend e Servidor com PM2..."
-pm2 stop vianfe-server 2>/dev/null || true
-pm2 start server/dist/index.js --name "vianfe-server"
-pm2 save
-pm2 startup | tail -n 1 | sudo bash || true
-
-# 6. Configurar Nginx Reverse Proxy
-echo "6. Configurando Nginx Reverse Proxy..."
-sudo tee /etc/nginx/sites-available/vianfe << 'EOF'
-server {
-    listen 80;
-    server_name _;
-
-    location / {
-        root /var/www/vianfe/client/dist;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-EOF
-
-sudo ln -sf /etc/nginx/sites-available/vianfe /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl restart nginx
-
-echo "=============================================================================="
-echo "✅ DEPLOY DO VIANFE CONCLUÍDO COM SUCESSO NA ORACLE CLOUD!"
-echo "🌐 Acesse no navegador pelo IP do servidor ou seu domínio configurado."
-echo "=============================================================================="
+#!/usr/bin/env bash
+# Execute na Oracle: bash deploy_oracle_cloud.sh <SHA completo de origin/main>
+set -euo pipefail
+cd /home/opc/vianfe
+exec 9>/home/opc/.vianfe-deploy.lock
+flock -n 9 || { echo 'Outro deploy está em execução'; exit 1; }
+sha="${1:?Informe o SHA completo publicado no GitHub}"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'SHA inválido'; exit 1; }
+git diff --quiet && git diff --cached --quiet || { echo 'Alterações locais: deploy bloqueado'; exit 1; }
+git fetch origin main
+[[ "$(git rev-parse origin/main)" == "$sha" ]] || { echo 'SHA não é o origin/main atual'; exit 1; }
+[[ "$(git rev-parse HEAD)" == "$sha" ]] || { echo 'Faça checkout do SHA aprovado antes de executar este script'; exit 1; }
+# O build usa dependências do lockfile e imagem Node identificada por digest.
+node_image='node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1'
+sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'npm --prefix server ci && npm --prefix client ci && npm --prefix server run build && npm --prefix client run build'
+[[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$sha" ]] || { echo 'GitHub mudou durante o build'; exit 1; }
+old_image=$(sudo -n docker inspect vianfe-api --format '{{.Image}}')
+sudo -n docker tag "$old_image" "vianfe-recovery:before-${sha:0:12}"
+sudo -n docker build --label "org.opencontainers.image.revision=$sha" -t vianfe-vianfe-api .
+sudo -n docker compose up -d --no-deps --no-build vianfe-api
+healthy=0
+for attempt in $(seq 1 15); do
+  if curl -fsS http://127.0.0.1:3001/health >/dev/null; then healthy=1; break; fi
+  sleep 2
+done
+[[ "$healthy" == 1 ]] || { echo 'Falha de saúde; entrega pendente, imagem de recuperação preservada'; exit 1; }
+actual=$(sudo -n docker inspect vianfe-api --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+[[ "$actual" == "$sha" ]] || { echo 'Container não corresponde ao SHA'; exit 1; }
+curl -fsS https://vianfe.contadordev.com.br/health
+printf '\nDeploy verificado: %s\n' "$sha"

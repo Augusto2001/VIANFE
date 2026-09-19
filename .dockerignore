@@ -1,0 +1,9 @@
+node_modules
+.git
+.agents
+server/storage
+server/dist.bak*
+server/dist.claude*
+*.zip
+*.sqlite*
+.env*
