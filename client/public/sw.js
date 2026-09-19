@@ -1,4 +1,4 @@
-const CACHE_NAME = 'viacont-superapp-v1';
+const CACHE_NAME = 'viacont-superapp-20260918-real-bpo';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -43,3 +43,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
