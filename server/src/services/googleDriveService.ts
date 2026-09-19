@@ -112,8 +112,7 @@ export class GoogleDriveService {
     const cleanCompanyName = companyName.replace(/[\/\\:*?"<>|]/g, '_').trim();
 
     if (!this.isConfigured || !this.driveClient) {
-      // Return virtual folder ID
-      return `virtual_${cleanCompanyName}_${year}_${month}_${subType}`;
+      throw new Error('Google Drive não configurado; backup pendente.');
     }
 
     try {
