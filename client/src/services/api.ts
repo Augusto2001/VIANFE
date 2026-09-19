@@ -472,17 +472,6 @@ export const api = {
     return json;
   },
 
-  async seedSampleBpoTransactions(companyId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/bpo/transactions/seed-sample`, {
-      method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ company_id: companyId }),
-    });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error || 'Falha ao gerar transações de exemplo');
-    return json;
-  },
-
   async getBpoCategories(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/bpo/categories`, { headers: getAuthHeaders() });
     const json = await res.json();

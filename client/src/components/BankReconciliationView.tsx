@@ -33,7 +33,6 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
-  const [seedingSample, setSeedingSample] = useState(false);
   const [companyInvoices, setCompanyInvoices] = useState<any[]>([]);
 
   // Upload Statement Modal State
@@ -121,37 +120,6 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     }
   };
 
-  const handleSimulateOpenFinanceTransaction = async () => {
-    try {
-      setOpenFinanceLoading(true);
-      setOpenFinanceFeedback(null);
-      const sample = [
-        {
-          data: new Date().toISOString().split('T')[0],
-          valor: 850.00,
-          tipo: 'CREDITO',
-          descricao: 'PIX RECEBIDO - CLIENTE VIP SERVICOS',
-          documento: `PIX_${Date.now()}`
-        },
-        {
-          data: new Date().toISOString().split('T')[0],
-          valor: 180.50,
-          tipo: 'DEBITO',
-          descricao: 'PAGTO TARIFA BANCARIA / MANUTENCAO CONTA',
-          documento: `TAR_${Date.now()}`
-        }
-      ];
-
-      const res = await api.sendOpenFinanceWebhook(company.id, sample);
-      setOpenFinanceFeedback(res.message || 'Transações simuladas com sucesso!');
-      await loadData();
-      await loadOpenFinanceInfo();
-    } catch (err: any) {
-      setOpenFinanceFeedback(`Erro: ${err.message}`);
-    } finally {
-      setOpenFinanceLoading(false);
-    }
-  };
 
   const handleAutoMapChartOfAccounts = async () => {
     try {
@@ -323,18 +291,6 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     }
   };
 
-  const handleSeedSample = async () => {
-    try {
-      setSeedingSample(true);
-      const res = await api.seedSampleBpoTransactions(company.id);
-      alert(res.message || 'Lançamentos de exemplo criados com sucesso!');
-      await loadData();
-    } catch (err: any) {
-      alert(`Erro ao criar transações de exemplo: ${err.message}`);
-    } finally {
-      setSeedingSample(false);
-    }
-  };
 
   const handleStatementFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -624,17 +580,6 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            
-            {/* ⚡ Seed Sample Conta Azul Button */}
-            <button
-              onClick={handleSeedSample}
-              disabled={seedingSample}
-              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-blue-500/25 flex items-center gap-1.5 cursor-pointer ring-1 ring-blue-400/30"
-              title="Gerar transações de demonstração no formato idêntico ao Conta Azul para testar a conciliação"
-            >
-              <Sparkles className={`w-4 h-4 text-amber-300 ${seedingSample ? 'animate-spin' : ''}`} />
-              <span>{seedingSample ? 'Gerando...' : '⚡ Dados Exemplo (Conta Azul)'}</span>
-            </button>
 
             {/* Open Finance & Webhooks Button */}
             <button
@@ -851,7 +796,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
             <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
             <h3 className="text-sm font-bold text-white">Nenhum lançamento pendente encontrado</h3>
             <p className="text-xs text-slate-400">
-              Importe um extrato bancário ou clique em <strong className="text-blue-400">⚡ Dados Exemplo (Conta Azul)</strong> no topo para testar a conciliação.
+              Importe um extrato bancário real para iniciar a conciliação.
             </p>
           </div>
         ) : (
@@ -1889,15 +1834,6 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
             )}
 
             <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={handleSimulateOpenFinanceTransaction}
-                disabled={openFinanceLoading}
-                className="px-4 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-300" />
-                <span>Simular Recebimento Webhook</span>
-              </button>
 
               <button
                 type="button"
