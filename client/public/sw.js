@@ -1,4 +1,4 @@
-const CACHE_NAME = 'viacont-superapp-20260918-real-bpo';
+const CACHE_NAME = 'viacont-superapp-20260920-bank-import';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -23,6 +23,16 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.url.includes('/api/') || event.request.url.startsWith('chrome-extension:')) {
+    return;
+  }
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).then(async (response) => {
+      if (response.ok && response.type === 'basic') {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put('/index.html', response.clone());
+      }
+      return response;
+    }).catch(() => caches.match('/index.html')));
     return;
   }
   event.respondWith(
