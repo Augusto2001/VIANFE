@@ -28,4 +28,12 @@ Ele não foi alterado nesta etapa. Seu último erro observado é a ausência de 
 4. Configurar a variável de ativação no serviço Compose e publicar o commit aprovado. Não manter os dois agendamentos ativos.
 5. Conferir SHA, saúde, migrações e resultados reais. Rejeições ou ausência de XML continuam pendentes.
 
-Não houve deploy, transmissão fiscal nem mudança de crontab nesta etapa. Código centralizado não significa recuperação dos XMLs concluída.
+Não houve deploy, transmissão fiscal nem mudança de crontab nas etapas 1 e 2. Código centralizado não significa recuperação dos XMLs concluída.
+
+## Continuação autorizada: entrega na main e Oracle
+
+O Compose passa a habilitar a rotina. Antes do deploy, executar `sudo python3 server/scripts/migrate_science_cron.py --apply`: preserva o crontab root, o script original e um backup consistente SQLite fora do checkout; retira exclusivamente a entrada legada. O deploy bloqueia se essa entrada permanecer e executa testes isolados antes de trocar a imagem.
+
+Testes: assinatura do SOAP efetivamente transmitido; resposta com namespace; correlação de chave/evento/ambiente/sequência; protocolo ausente; rejeição; bloqueio de sobreposição; fuso explícito; rotina desabilitada sem configuração. Todos sem chamadas fiscais reais.
+
+Após deploy: conferir SHA, saúde pública, ausência do cron antigo e rodar `node /app/server/scripts/auto_ciencia.mjs --check` dentro do container. Esse comando consulta o banco em modo somente leitura e verifica a abertura dos certificados sem transmitir eventos. A execução fiscal permanece no ciclo agendado; aceitação pela SEFAZ e XML completo devem ser conferidos após esse ciclo.

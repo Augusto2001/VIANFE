@@ -12,7 +12,7 @@ const { parseFiscalXml } = require('../dist/services/xmlParser.js');
 import path from 'path';
 import https from 'https';
 import zlib from 'zlib';
-import crypto from 'crypto';
+import { pathToFileURL } from 'node:url';
 import forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
 import { XMLParser } from 'fast-xml-parser';
@@ -29,7 +29,7 @@ const ufToCode = { RO:'11',AC:'12',AM:'13',RR:'14',PA:'15',AP:'16',TO:'17',MA:'2
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString(), ...a);
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false });
+const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, attributeNamePrefix: '@_', parseTagValue: false });
 
 // ---- Cripto / cert ----
 function pfxToPem(buf, pass) {
@@ -47,7 +47,7 @@ function loadCert(company) {
 }
 
 // ---- Assinatura XML-DSig do evento ----
-function signEvent(eventoXml, idEvento, keyPem, certPem) {
+export function signEvent(eventoXml, idEvento, keyPem, certPem) {
   const sig = new SignedXml({
     privateKey: keyPem, publicCert: certPem,
     signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
@@ -74,26 +74,35 @@ function httpsSoap(hostname, pathname, action, body, certPem, keyPem) {
 }
 
 // ---- Manifestação (RecepcaoEvento4) ----
-async function sendCiencia(company, chave, keyPem, certPem) {
+export async function sendCiencia(company, chave, keyPem, certPem, transport = httpsSoap) {
+  if (!/^\d{44}$/.test(chave)) throw new Error('Chave inválida');
   const cnpj = (company.cnpj || '').replace(/\D/g, '');
   const cUf = ufToCode[(company.uf || '').toUpperCase()] || '29';
   const tpAmb = company.sefaz_ambiente === 'homologacao' ? '2' : '1';
   const dhEvento = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z/, '-03:00');
   const idEvento = `ID210210${chave}01`;
   const evento = `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><infEvento Id="${idEvento}"><cOrgao>91</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chave}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>210210</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Ciencia da Operacao</descEvento></detEvento></infEvento></evento>`;
-  
+
   const unsignedEnv = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now()}</idLote>${evento}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
   const env = signEvent(unsignedEnv, idEvento, keyPem, certPem);
   const host = tpAmb === '2' ? 'hom1.nfe.fazenda.gov.br' : 'www1.nfe.fazenda.gov.br';
-  const xml = await httpsSoap(host, '/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx', 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEventoNF', env, certPem, keyPem);
-  const j = JSON.stringify(parser.parse(xml));
-  // pega o cStat do retEvento (evento), não do lote
-  const evMatch = xml.match(/<retEvento[\s\S]*?<\/retEvento>/);
-  const scope = evMatch ? evMatch[0] : xml;
-  const cStat = (scope.match(/<cStat>(\d+)<\/cStat>/) || [])[1] || (j.match(/"cStat":"?(\d+)"?/) || [])[1];
-  const xMotivo = (scope.match(/<xMotivo>([^<]+)<\/xMotivo>/) || [])[1] || '';
-  const nProt = (scope.match(/<nProt>(\d+)<\/nProt>/) || [])[1] || '';
-  if (ACEITE.has(cStat) && (!/^\d{15}$/.test(nProt) || !scope.includes('<chNFe>'+chave+'</chNFe>') || !scope.includes('<tpEvento>210210</tpEvento>') || !scope.includes('<tpAmb>'+tpAmb+'</tpAmb>'))) throw new Error('Resposta de ciência sem protocolo ou correspondência confirmada');
+  const xml = await transport(host, '/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx', 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEventoNF', env, certPem, keyPem);
+  return parseScienceResponse(xml, chave, tpAmb);
+}
+
+function findNode(value, name) {
+  if (!value || typeof value !== 'object') return undefined;
+  if (value[name]) return value[name];
+  for (const child of Object.values(value)) { const found = findNode(child, name); if (found) return found; }
+}
+export function parseScienceResponse(xml, chave, tpAmb) {
+  const batch = findNode(parser.parse(xml), 'retEnvEvento');
+  if (!batch) throw new Error('Resposta SEFAZ sem retEnvEvento');
+  const event = batch.retEvento?.infEvento;
+  const cStat = String(event?.cStat || batch.cStat || '');
+  const xMotivo = String(event?.xMotivo || batch.xMotivo || '');
+  const nProt = String(event?.nProt || '');
+  if (ACEITE.has(cStat) && (!/^\d{15}$/.test(nProt) || event?.chNFe !== chave || event?.tpEvento !== '210210' || event?.tpAmb !== tpAmb || String(event?.nSeqEvento) !== '1')) throw new Error('Resposta de ciência sem protocolo ou correspondência confirmada');
   return { cStat, xMotivo, nProt };
 }
 
@@ -120,9 +129,11 @@ async function fetchFullXml(company, chave, keyPem, certPem) {
 }
 
 // ---- Main ----
-if (process.env.VIANFE_AUTO_CIENCIA_ENABLED !== 'true') throw new Error('Rotina desativada: migração do cron externo ainda deve ser validada.');
-const db = new DatabaseSync(DB_PATH);
-try { db.exec('PRAGMA busy_timeout=8000;'); } catch {}
+export async function main() {
+const checkOnly = process.argv.includes('--check');
+if (!checkOnly && process.env.VIANFE_AUTO_CIENCIA_ENABLED !== 'true') throw new Error('Rotina desativada: migração do cron externo ainda deve ser validada.');
+const db = new DatabaseSync(DB_PATH, { readOnly: checkOnly });
+db.exec('PRAGMA busy_timeout=8000;');
 
 const retryOnly = process.argv.includes('--retry-only');
 const onlyCompany = process.argv.slice(2).find(a => !a.startsWith('--')) || null;
@@ -130,6 +141,14 @@ const companies = (onlyCompany
   ? db.prepare("SELECT * FROM companies WHERE id = ? AND status = 'ativo' AND cert_filename IS NOT NULL").all(onlyCompany)
   : db.prepare("SELECT * FROM companies WHERE status = 'ativo' AND cert_filename IS NOT NULL ORDER BY razao_social").all());
 
+if (checkOnly) {
+  let certificatesOk=0, certificatesUnavailable=0;
+  for (const c of companies) { try { loadCert(c); certificatesOk++; } catch { certificatesUnavailable++; } }
+  const columns = db.prepare('PRAGMA table_info(nfe_manifestations)').all().map(c=>c.name);
+  const schemaOk = ['sefaz_cstat','sefaz_xmotivo'].every(c=>columns.includes(c));
+  log('PREFLIGHT SEM ENVIO', JSON.stringify({companies:companies.length,certificatesOk,certificatesUnavailable,schemaOk}));
+  db.close(); if (!schemaOk) throw new Error('Migração ausente'); return;
+}
 log(`INICIO ciência autônoma — ${companies.length} empresa(s)`);
 const T = { cand: 0, aceita: 0, xml: 0, rej: 0, err: 0, lock: [] };
 
@@ -163,13 +182,13 @@ for (const c of (retryOnly ? [] : companies)) {
         }
         await sleep(DELAY_MS); continue;
       }
-      T.aceita++; okC++;
-      let full = null;
-      // Download is handled below, including previously accepted science.
-      if (full) { db.prepare("UPDATE invoices SET xml_raw=?, status='manifestado_ciencia' WHERE id=?").run(full, inv.id); T.xml++; }
-      else { db.prepare("UPDATE invoices SET status='manifestado_ciencia' WHERE id=?").run(inv.id); }
-      db.prepare(`INSERT INTO nfe_manifestations (id,invoice_id,company_id,user_id,event_type,event_code,sefaz_protocol,status,sefaz_cstat,sefaz_xmotivo,manifested_at) VALUES (?,?,?, 'auto-standalone','ciencia','210210',?,'autorizado',?,?,?)`)
-        .run(`mnf_${inv.id}_${Date.now()}`, inv.id, c.id, r.nProt, r.cStat, r.xMotivo, new Date().toISOString());
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare(`INSERT INTO nfe_manifestations (id,invoice_id,company_id,user_id,event_type,event_code,sefaz_protocol,status,sefaz_cstat,sefaz_xmotivo,manifested_at) VALUES (?,?,?, 'auto-versioned','ciencia','210210',?,'autorizado',?,?,?)`)
+          .run(`mnf_${inv.id}_${Date.now()}`, inv.id, c.id, r.nProt, r.cStat, r.xMotivo, new Date().toISOString());
+        db.prepare("UPDATE invoices SET status='manifestado_ciencia' WHERE id=? AND status NOT LIKE 'manifestado_%'").run(inv.id);
+        db.exec('COMMIT'); T.aceita++; okC++;
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
     } catch (e) { T.err++; log(`ERRO ${inv.chave_acesso}: ${e.message}`); }
     await sleep(DELAY_MS);
   }
@@ -183,7 +202,7 @@ for (const c of companies) {
   const lock=db.prepare('SELECT sefaz_locked_until FROM companies WHERE id=?').get(c.id);
   if (lock?.sefaz_locked_until && new Date(lock.sefaz_locked_until)>new Date()) continue;
   const targets=db.prepare(`SELECT i.* FROM invoices i WHERE i.company_id=?
-    AND i.xml_raw LIKE '%<resNFe%' AND i.xml_raw NOT LIKE '%<infNFe%'
+    AND (i.xml_raw IS NULL OR i.xml_raw LIKE '%resNFe%')
     AND EXISTS(SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id=i.id AND m.event_code='210210' AND m.status='autorizado')
     ORDER BY i.data_emissao DESC LIMIT ?`).all(c.id,MAX_PER_COMPANY);
   if(!targets.length) continue;
@@ -197,7 +216,7 @@ for (const c of companies) {
       }
       if(f.full){
         const p=parseFiscalXml(f.full);
-        if(p.chaveAcesso!==inv.chave_acesso || p.naturezaOperacao.startsWith('Resumo ')) throw Error('XML retornado nao corresponde a nota completa solicitada');
+        if(p.chaveAcesso!==inv.chave_acesso || p.naturezaOperacao.startsWith('Resumo ') || !/^\d{15}$/.test(p.protocoloAutorizacao || '')) throw Error('XML retornado nao corresponde a nota completa solicitada');
         db.prepare(`UPDATE invoices SET xml_raw=?, natureza_operacao=?, itens_json=?, duplicatas_json=?, pagamentos_json=?, fatura_json=?, valor_produtos=?, valor_icms=?, valor_pis=?, valor_cofins=?, valor_ipi=?, gdrive_synced=0 WHERE id=?`)
           .run(f.full,p.naturezaOperacao,JSON.stringify(p.itens),JSON.stringify(p.duplicatas),JSON.stringify(p.pagamentos),JSON.stringify(p.fatura||null),p.totais.valorProdutos,p.totais.valorIcms,p.totais.valorPis,p.totais.valorCofins,p.totais.valorIpi,inv.id);
         recovered++; log('RETRY XML completo',inv.id);
@@ -208,5 +227,7 @@ for (const c of companies) {
 }
 log('RECUPERACAO',JSON.stringify({recovered,pending}));
 db.close();
-process.exit(0);
-
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(error => { console.error(error.message); process.exitCode = 1; });
+}

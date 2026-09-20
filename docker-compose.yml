@@ -38,6 +38,7 @@ services:
     ports:
       - "3001:3001"
     environment:
+      VIANFE_AUTO_CIENCIA_ENABLED: "true"
       PORT: 3001
       NODE_ENV: production
       DATABASE_URL: postgres://vianfe_user:${POSTGRES_PASSWORD:-vianfe_secure_pg_pass_2026}@vianfe-postgres:5432/vianfe_db

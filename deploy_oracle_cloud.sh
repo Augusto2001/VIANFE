@@ -10,9 +10,16 @@ git diff --quiet && git diff --cached --quiet || { echo 'Alterações locais: de
 git fetch origin main
 [[ "$(git rev-parse origin/main)" == "$sha" ]] || { echo 'SHA não é o origin/main atual'; exit 1; }
 [[ "$(git rev-parse HEAD)" == "$sha" ]] || { echo 'Faça checkout do SHA aprovado antes de executar este script'; exit 1; }
+# Não ativar o scheduler versionado enquanto o cron legado ainda existe.
+legacy_cron=$(sudo -n crontab -l)
+if printf '%s\n' "$legacy_cron" | grep -v '^#' | grep -q '/app/server/storage/auto_ciencia_standalone.mjs'; then
+  echo 'Migração pendente: retire o cron legado com server/scripts/migrate_science_cron.py após backup'
+  exit 1
+fi
 # O build usa dependências do lockfile e imagem Node identificada por digest.
 node_image='node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1'
 sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'npm --prefix server ci && npm --prefix client ci && npm --prefix server run build && npm --prefix client run build'
+sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'node server/tests/science-protocol.cjs && node server/tests/scheduler-ciencia.cjs && node server/tests/no-simulated-success.cjs'
 [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$sha" ]] || { echo 'GitHub mudou durante o build'; exit 1; }
 old_image=$(sudo -n docker inspect vianfe-api --format '{{.Image}}')
 sudo -n docker tag "$old_image" "vianfe-recovery:before-${sha:0:12}"
