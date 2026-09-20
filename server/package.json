@@ -27,7 +27,8 @@
     "pdfkit": "^0.16.0",
     "puppeteer-core": "^25.8.0",
     "tesseract.js": "^7.0.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xml-crypto": "6.1.2"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",

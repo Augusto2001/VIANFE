@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
 import cron from 'node-cron';
 import { db } from '../database/db.js';
 import { sefazService } from '../services/sefazService.js';
@@ -10,7 +12,10 @@ export function initScheduler() {
   /**
    * Helper function: Executa a varredura SEFAZ para todas as empresas ativas com certificado A1
    */
+  let fiscalRunning = false;
   const runSefazBatchSync = async (triggerOrigin: string) => {
+    if (fiscalRunning) { console.warn('Ciclo fiscal anterior ainda em execução'); return; }
+    fiscalRunning = true;
     console.log(`🤖 [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Iniciando varredura para empresas ativas...`);
 
     try {
@@ -41,9 +46,17 @@ export function initScheduler() {
       }
 
       console.log(`🏁 [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Ciclo finalizado com sucesso. Total de notas capturadas no lote: ${totalSyncedNotes}`);
+      if (triggerOrigin === 'MADRUGADA_02H30' && process.env.VIANFE_AUTO_CIENCIA_ENABLED === 'true') {
+        await new Promise<void>((resolve, reject) => execFile(process.execPath,
+          [path.resolve(__dirname, '../../scripts/auto_ciencia.mjs')],
+          { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+            if (stdout) console.log(stdout); if (stderr) console.warn(stderr);
+            if (err) reject(err); else resolve();
+          }));
+      }
     } catch (err: any) {
       console.error(`❌ [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Erro crítico no ciclo:`, err.message);
-    }
+    } finally { fiscalRunning = false; }
   };
 
   /**
@@ -81,22 +94,22 @@ export function initScheduler() {
   // Ciclo 1: 01:15 AM
   cron.schedule('15 1 * * *', () => {
     runSefazBatchSync('MADRUGADA_01H15');
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   // Ciclo 2: 02:30 AM
   cron.schedule('30 2 * * *', () => {
     runSefazBatchSync('MADRUGADA_02H30');
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   // 2. Robô de Backup Automático no Google Drive (A cada 30 minutos - não consome SEFAZ)
   cron.schedule('*/30 * * * *', () => {
     runDriveAutoBackup();
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   // 3. Robô Radar de Alertas Preditivos no WhatsApp (Diariamente às 09:30 AM - Horário de Brasília)
   cron.schedule('30 9 * * *', () => {
     predictiveAlertsService.runDailyBatchAlerts().catch(e => console.error('[ROBÔ RADAR WHATSAPP] Erro no ciclo matinal:', e.message));
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna (01:00 às 03:00):');
   console.log('  └─ Varredura Madrugada 1: Diariamente às 01:15 AM (Brasília)');

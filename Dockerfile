@@ -19,6 +19,7 @@ RUN apk add --no-cache \
 COPY package*.json ./
 COPY server/package*.json ./server/
 COPY server/dist ./server/dist
+COPY server/scripts ./server/scripts
 COPY client/dist ./client/dist
 
 RUN cd server && npm ci --omit=dev

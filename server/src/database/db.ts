@@ -776,6 +776,11 @@ export function initDatabase() {
   `);
 
   // Migrações de colunas para bloqueio e carência SEFAZ
+  for (const column of ['sefaz_cstat', 'sefaz_xmotivo']) {
+    if (!(db.prepare('PRAGMA table_info(nfe_manifestations)').all() as any[]).some(c => c.name === column)) {
+      db.exec(`ALTER TABLE nfe_manifestations ADD COLUMN ${column} TEXT`);
+    }
+  }
   try { db.exec("ALTER TABLE companies ADD COLUMN sefaz_locked_until TEXT;"); } catch {}
   try { db.exec("ALTER TABLE companies ADD COLUMN sefaz_last_cstat TEXT;"); } catch {}
   try { db.exec("ALTER TABLE companies ADD COLUMN sefaz_last_xmotivo TEXT;"); } catch {}
