@@ -17,7 +17,7 @@ lines = cron.splitlines(keepends=True)
 matches = [line for line in lines if not line.lstrip().startswith('#') and legacy in line]
 if len(matches) != 1:
     raise SystemExit('Expected exactly one legacy cron entry; no changes made')
-processes = subprocess.check_output(['docker', 'top', 'vianfe-api', '-eo', 'args'], text=True)
+processes = subprocess.check_output(['docker', 'top', 'vianfe-api', '-eo', 'pid,args'], text=True)
 if 'auto_ciencia_standalone.mjs' in processes:
     raise SystemExit('Legacy science is running; no changes made')
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
