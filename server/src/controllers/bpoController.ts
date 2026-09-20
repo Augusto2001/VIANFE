@@ -16,18 +16,7 @@ export const bpoController = {
         return;
       }
 
-      let accounts = db.prepare('SELECT * FROM bank_accounts WHERE company_id = ? ORDER BY banco_nome ASC').all(company_id as string) as any[];
-
-      // If company has no bank account yet, create a default Caixa / Conta Principal
-      if (accounts.length === 0) {
-        const defaultAccId = uuidv4();
-        db.prepare(`
-          INSERT INTO bank_accounts (id, company_id, banco_nome, banco_codigo, agencia, conta, tipo_conta, saldo_inicial, saldo_atual, created_at)
-          VALUES (?, ?, 'Banco Principal (Conta Corrente)', '001', '0001', '12345-6', 'corrente', 0.0, 0.0, datetime('now'))
-        `).run(defaultAccId, company_id as string);
-
-        accounts = db.prepare('SELECT * FROM bank_accounts WHERE company_id = ?').all(company_id as string) as any[];
-      }
+      const accounts = db.prepare('SELECT * FROM bank_accounts WHERE company_id = ? ORDER BY banco_nome ASC').all(company_id as string) as any[];
 
       res.json({ success: true, data: accounts });
     } catch (err: any) {

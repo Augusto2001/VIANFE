@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Universal Bank Statement Parser for Brazilian Banks
  * Supports:
@@ -33,7 +34,7 @@ function cleanXmlEntities(str: string): string {
 }
 
 export function parseOfx(rawContent: string): OfxParsedStatement {
-  const content = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const content = rawContent.replace(/<\s*(\/?)\s*([a-z0-9]+)\s*>/gi, '<$1$2>').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
   // Detecção case-insensitive para arquivos OFX (SGML e XML)
   if (/<STMTTRN>|<OFX>|OFXHEADER|<BANKTRANLIST>|<CCSTMTTRNRS>/i.test(content)) {
@@ -82,8 +83,8 @@ function parseStandardOfx(content: string): OfxParsedStatement {
       const day = dateMatch[3];
       const formattedDate = `${year}-${month}-${day}`;
 
-      let rawAmt = amtMatch[1].trim().replace(',', '.');
-      const numAmt = parseFloat(rawAmt);
+      const rawAmt = amtMatch[1].trim();
+      const numAmt = Number(rawAmt.includes(',') ? rawAmt.replace(/\./g, '').replace(',', '.') : rawAmt);
       if (isNaN(numAmt)) continue;
 
       const trnType = numAmt < 0 ? 'DEBITO' : 'CREDITO';
@@ -99,7 +100,7 @@ function parseStandardOfx(content: string): OfxParsedStatement {
           ? checknumMatch[1].trim() 
           : (refnumMatch 
             ? refnumMatch[1].trim() 
-            : `OFX_${year}${month}${day}_${i}_${Math.random().toString(36).substring(7)}`));
+            : `OFX_${createHash('sha256').update(block.trim()).digest('hex').slice(0, 24)}_${i}`));
 
       transactions.push({
         id: doc,
@@ -131,7 +132,6 @@ function parseCsvOrTxtStatement(content: string): OfxParsedStatement {
     'CONTA:', 'CONTA CORRENTE', 'TITULAR:', 'CNPJ:', 'CPF:', 'DATA;LANCAMENTO', 'DATA;HISTORICO'
   ];
 
-  const currentYear = new Date().getFullYear().toString();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -162,28 +162,28 @@ function parseCsvOrTxtStatement(content: string): OfxParsedStatement {
       formattedDate = `${year}-${dateShortYearMatch[2]}-${dateShortYearMatch[1]}`;
       dateStrRaw = dateShortYearMatch[0];
     } else if (dateNoYearMatch && (upperLine.includes('PIX') || upperLine.includes('TED') || upperLine.includes('PAGTO') || upperLine.includes('TAR') || upperLine.includes('DEB') || upperLine.includes('CRED'))) {
-      formattedDate = `${currentYear}-${dateNoYearMatch[2]}-${dateNoYearMatch[1]}`;
-      dateStrRaw = dateNoYearMatch[0];
+      throw new Error(`Linha ${i + 1}: data sem ano. Informe o ano no extrato; ele não será estimado.`);
     } else {
       continue;
     }
 
     // 2. Extração de valores monetários
     const moneyRegex = /[+-]?\s*\d{1,3}(?:\.\d{3})*,\d{2}|[+-]?\s*\d+(?:\.\d{3})*,\d{2}|[+-]?\s*\d+\.\d{2}/g;
-    const matches = [...line.matchAll(moneyRegex)];
+    // A data não pode participar da extração monetária (ex.: 19.09.2026).
+    const amountLine = line.replace(dateStrRaw, '');
+    const matches = [...amountLine.matchAll(moneyRegex)];
 
     if (matches.length === 0) continue;
 
     const targetMatch = matches[0][0].replace(/\s+/g, '');
 
-    let isNegative = false;
-    if (targetMatch.includes('-')) {
-      isNegative = true;
-    } else if (upperLine.includes(' D ') || upperLine.endsWith(' D') || upperLine.includes('DEBITO') || upperLine.includes('DÉBITO') || upperLine.includes('PAGTO') || upperLine.includes('TARIFA') || upperLine.includes('COMPRA')) {
-      if (!upperLine.includes(' C ') && !upperLine.endsWith(' C') && !upperLine.includes('CREDITO') && !upperLine.includes('CRÉDITO') && !upperLine.includes('RECEB') && !upperLine.includes('DEP')) {
-        isNegative = true;
-      }
+    // D/C pertence ao valor da movimentação, nunca ao saldo da última coluna.
+    const afterValue = amountLine.slice(matches[0].index! + matches[0][0].length);
+    const marker = afterValue.match(/^\s*(?:[;|\t]\s*)?([DC])(?=\s|[;|\t]|$)/i)?.[1]?.toUpperCase();
+    if ((targetMatch.startsWith('-') && marker === 'C') || (targetMatch.startsWith('+') && marker === 'D')) {
+      throw new Error(`Linha ${i + 1}: sinal e indicador de débito/crédito conflitantes.`);
     }
+    const isNegative = marker ? marker === 'D' : targetMatch.startsWith('-');
 
     let cleanVal = targetMatch.replace('+', '').replace('-', '');
     if (cleanVal.includes(',')) {
@@ -215,7 +215,7 @@ function parseCsvOrTxtStatement(content: string): OfxParsedStatement {
       desc = `Transação ${tipo === 'DEBITO' ? 'Débito' : 'Crédito'}`;
     }
 
-    const docId = `EXT_${formattedDate.replace(/-/g, '')}_${i}_${Math.random().toString(36).substring(7)}`;
+    const docId = `EXT_${createHash('sha256').update(line).digest('hex').slice(0, 24)}_${i}`;
 
     transactions.push({
       id: docId,

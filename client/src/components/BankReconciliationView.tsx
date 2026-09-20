@@ -300,6 +300,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   };
 
   const processStatementFile = (file: File) => {
+    setOfxContent('');
     setSelectedStatementFileName(file.name);
     setStatementResult(null);
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
@@ -317,26 +318,16 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       reader.readAsDataURL(file);
     } else {
       reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          setOfxContent(text);
-          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-          setStatementFileLinesCount(lines.length);
-        }
+        const bytes = event.target?.result as ArrayBuffer;
+        if (!bytes) return;
+        let text: string;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+        catch { text = new TextDecoder('windows-1252').decode(bytes); }
+        setOfxContent(text);
+        setStatementFileLinesCount(text.split(/\r?\n/).filter(l => l.trim().length > 0).length);
       };
-      reader.onerror = () => {
-        const fallbackReader = new FileReader();
-        fallbackReader.onload = (e) => {
-          const t = e.target?.result as string;
-          if (t) {
-            setOfxContent(t);
-            const lines = t.split(/\r?\n/).filter(l => l.trim().length > 0);
-            setStatementFileLinesCount(lines.length);
-          }
-        };
-        fallbackReader.readAsText(file, 'ISO-8859-1');
-      };
-      reader.readAsText(file, 'utf-8');
+      reader.onerror = () => alert('Não foi possível ler o arquivo. Selecione-o novamente.');
+      reader.readAsArrayBuffer(file);
     }
   };
 

@@ -1,0 +1,19 @@
+// Fixtures are isolated in memory. No bank records are created.
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const {parseOfx}=require('../dist/services/ofxParser.js');
+const transaction=s=>{const result=parseOfx(s).transactions;assert.equal(result.length,1);return result[0]};
+assert.equal(transaction('19.09.2026;PIX RECEBIDO;100,00;900,00').valor,100);
+assert.equal(transaction('19/09/2026;PIX ENVIADO;100,00 D;900,00 C').tipo,'DEBITO');
+assert.equal(transaction('19/09/2026;PIX RECEBIDO;100,00 C;900,00 D').tipo,'CREDITO');
+assert.equal(transaction('19/09/2026;TRANSFERENCIA;-100,00;900,00 C').tipo,'DEBITO');
+assert.throws(()=>parseOfx('19/09/2026;PIX; -100,00 C;900,00'),/conflitantes/);
+assert.throws(()=>parseOfx('19/09;PIX;100,00;900,00'),/sem ano/);
+assert.equal(parseOfx('19/09/2026;SALDO ANTERIOR;900,00').transactions.length,0);
+const ofx='<ofx ><banktranlist ><stmttrn ><dtposted >20260919<trnamt >-1234.56<fitid >bank-id<memo >PIX recebido</banktranlist ></ofx >';
+assert.equal(transaction(ofx).valor,1234.56);assert.equal(transaction(ofx).tipo,'DEBITO');assert.equal(transaction(ofx).documento,'bank-id');
+const csv='19/09/2026;PIX RECEBIDO;100,00;900,00';assert.equal(transaction(csv).id,transaction(csv).id);
+let writes=0;const exportsObject={};
+const stubs={'../database/db.js':{db:{prepare:sql=>{assert.match(sql,/^SELECT/);return {all:()=>[],run:()=>{writes++;throw Error('Unexpected write')}}}}},'uuid':{v4:()=>{throw Error('Unexpected account creation')}},'../services/ofxParser.js':{parseOfx},'pdf-parse':{},'../services/predictiveAlertsService.js':{},'../services/openFinanceService.js':{}};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/controllers/bpoController.js'),'utf8'),{exports:exportsObject,require:n=>{assert.ok(n in stubs,n);return stubs[n]},console});
+(async()=>{let body;const res={status:()=>res,json:x=>{body=x}};await exportsObject.bpoController.getAccounts({query:{company_id:'offline-fixture'}},res);assert.equal(body.success,true);assert.equal(body.data.length,0);assert.equal(writes,0);console.log('PASS: date/value separation, transaction D/C, signs, missing year, balances, OFX whitespace/SGML, stable IDs and no fictitious account.');})().catch(e=>{console.error(e);process.exitCode=1});
