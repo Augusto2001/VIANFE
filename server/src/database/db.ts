@@ -473,6 +473,14 @@ export function initDatabase() {
     // Ignore migration error
   }
 
+  // A friendly category is shared by the office, but its reduced account is company-specific.
+  db.exec(`CREATE TABLE IF NOT EXISTS financial_category_accounts (
+    category_id TEXT NOT NULL REFERENCES financial_categories(id) ON DELETE CASCADE,
+    company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    codigo_reduzido TEXT NOT NULL,
+    PRIMARY KEY (category_id, company_id)
+  )`);
+
   // Migrate existing users table if tenant_id column missing
   try {
     const tableInfo = db.prepare("PRAGMA table_info('users')").all() as any[];

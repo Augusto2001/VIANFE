@@ -1,4 +1,4 @@
-const CACHE_NAME = 'viacont-superapp-20260923-bpo-categories';
+const CACHE_NAME = 'viacont-superapp-20260923-category-reduced-code';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

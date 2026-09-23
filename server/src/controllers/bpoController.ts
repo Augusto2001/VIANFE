@@ -378,7 +378,16 @@ export const bpoController = {
   // 6. List financial categories
   async getCategories(req: Request, res: Response): Promise<void> {
     try {
-      const categories = db.prepare('SELECT * FROM financial_categories WHERE tenant_id = ? ORDER BY codigo ASC').all((req as AuthenticatedRequest).user!.tenant_id);
+      const companyId = req.query.company_id;
+      if (companyId !== undefined && typeof companyId !== 'string') {
+        res.status(400).json({ error: 'company_id inválido.' }); return;
+      }
+      if (companyId && !canAccessCompany(req, res, companyId)) return;
+      const categories = db.prepare(`SELECT c.*, a.codigo_reduzido,
+        p.nome_conta AS conta_nome FROM financial_categories c
+        LEFT JOIN financial_category_accounts a ON a.category_id = c.id AND a.company_id = ?
+        LEFT JOIN dominio_chart_of_accounts p ON p.company_id = a.company_id AND p.codigo_conta = a.codigo_reduzido
+        WHERE c.tenant_id = ? ORDER BY c.nome ASC`).all(companyId || '', (req as AuthenticatedRequest).user!.tenant_id);
       res.json({ success: true, data: categories });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -388,8 +397,16 @@ export const bpoController = {
   async createCategory(req: Request, res: Response): Promise<void> {
     try {
       const user = (req as AuthenticatedRequest).user!;
-      const { company_id, nome, tipo } = req.body;
+      const { company_id, nome, tipo, codigo_reduzido } = req.body;
       if (!canAccessCompany(req, res, company_id)) return;
+      if (codigo_reduzido !== undefined) {
+        const account = typeof codigo_reduzido === 'string' && db.prepare(
+          'SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?'
+        ).get(company_id, codigo_reduzido.trim()) as any;
+        if (!account || account.tipo_conta !== 'analitica' || !isReadableFinancialText(account.nome_conta)) {
+          res.status(400).json({ error: 'Selecione um código reduzido de conta analítica válida do plano desta empresa.' }); return;
+        }
+      }
       if (!isReadableFinancialText(nome) || nome.trim().length > 120 ||
           !['receita', 'despesa', 'imposto', 'folha', 'transferencia', 'emprestimo'].includes(tipo)) {
         res.status(400).json({ error: 'Informe um nome legível de até 120 caracteres e um tipo válido.' }); return;
@@ -397,11 +414,24 @@ export const bpoController = {
       const normalized = nome.trim().replace(/\s+/g, ' ');
       const categories = db.prepare('SELECT * FROM financial_categories WHERE tenant_id = ?').all(user.tenant_id) as any[];
       const existing = categories.find(c => c.tipo === tipo && c.nome.trim().toLocaleLowerCase('pt-BR') === normalized.toLocaleLowerCase('pt-BR'));
-      if (existing) { res.json({ success: true, data: existing }); return; }
-      const id = uuidv4();
-      db.prepare(`INSERT INTO financial_categories (id, tenant_id, codigo, nome, tipo, created_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(id, user.tenant_id, `CUSTOM-${id}`, normalized, tipo);
-      res.status(201).json({ success: true, data: db.prepare('SELECT * FROM financial_categories WHERE id = ?').get(id) });
+      const id = existing?.id || uuidv4();
+      const previous = db.prepare('SELECT codigo_reduzido FROM financial_category_accounts WHERE category_id = ? AND company_id = ?').get(id, company_id) as any;
+      if (previous && codigo_reduzido !== undefined && previous.codigo_reduzido !== codigo_reduzido.trim()) {
+        res.status(409).json({ error: 'Esta categoria já possui outro código reduzido nesta empresa. Use um nome diferente ou revise o vínculo existente.' }); return;
+      }
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (!existing) db.prepare(`INSERT INTO financial_categories (id, tenant_id, codigo, nome, tipo, created_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(id, user.tenant_id, `CUSTOM-${id}`, normalized, tipo);
+        if (codigo_reduzido !== undefined) db.prepare(`INSERT INTO financial_category_accounts (category_id, company_id, codigo_reduzido)
+          VALUES (?, ?, ?) ON CONFLICT(category_id, company_id) DO NOTHING`).run(id, company_id, codigo_reduzido.trim());
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      const data = db.prepare(`SELECT c.*, a.codigo_reduzido, p.nome_conta AS conta_nome FROM financial_categories c
+        LEFT JOIN financial_category_accounts a ON a.category_id = c.id AND a.company_id = ?
+        LEFT JOIN dominio_chart_of_accounts p ON p.company_id = a.company_id AND p.codigo_conta = a.codigo_reduzido
+        WHERE c.id = ?`).get(company_id, id);
+      res.status(existing ? 200 : 201).json({ success: true, data });
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   },
 

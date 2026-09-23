@@ -472,7 +472,7 @@ export const api = {
     return json;
   },
 
-  async createBpoCategory(data: { company_id: string; nome: string; tipo: string }): Promise<any> {
+  async createBpoCategory(data: { company_id: string; nome: string; tipo: string; codigo_reduzido: string }): Promise<any> {
     const res = await fetch(`${API_BASE}/bpo/categories`, {
       method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data)
     });
@@ -481,8 +481,8 @@ export const api = {
     return json.data;
   },
 
-  async getBpoCategories(): Promise<any[]> {
-    const res = await fetch(`${API_BASE}/bpo/categories`, { headers: getAuthHeaders() });
+  async getBpoCategories(companyId?: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/bpo/categories${companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''}`, { headers: getAuthHeaders() });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Falha ao buscar categorias');
     return json.data;

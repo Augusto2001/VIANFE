@@ -22,6 +22,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [categoryRowId, setCategoryRowId] = useState<string | null>(null);
   const [categoryName, setCategoryName] = useState('');
   const [categoryType, setCategoryType] = useState('despesa');
+  const [categoryAccountCode, setCategoryAccountCode] = useState('');
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryError, setCategoryError] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -216,7 +217,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       setLoading(true);
       const [resTrn, resCat, resChart, resProv, resInv] = await Promise.all([
         api.getBpoTransactions(company.id, filterStatus === 'all' ? undefined : filterStatus),
-        api.getBpoCategories(),
+        api.getBpoCategories(company.id),
         api.getChartOfAccounts(company.id).catch(() => []),
         api.getProvisions(company.id).catch(() => []),
         api.getInvoices({ company_id: company.id, limit: 100 }).catch(() => ({ invoices: [] }))
@@ -231,7 +232,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       setCategories(resCat || []);
       const invalidAccount = (c: any) => /[\ufffd\u0000-\u0008]|%PDF-|\/FontBBox|endstream/i.test(c.nome_conta || '');
       setInvalidChartCount((resChart || []).filter(invalidAccount).length);
-      setChartList((resChart || []).map((c: any) => invalidAccount(c) ? { ...c, nome_conta: '[Nome ilegível — reimporte o plano de contas]' } : c));
+      setChartList((resChart || []).map((c: any) => invalidAccount(c) ? { ...c, invalid: true, nome_conta: '[Nome ilegível — reimporte o plano de contas]' } : c));
       setProvisionsList(resProv || []);
       setCompanyInvoices(resInv.invoices || []);
     } catch (err: any) {
@@ -271,7 +272,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     if (!rowId || categorySaving) return;
     setCategorySaving(true); setCategoryError('');
     try {
-      const created = await api.createBpoCategory({ company_id: companyId, nome: categoryName, tipo: categoryType });
+      const created = await api.createBpoCategory({ company_id: companyId, nome: categoryName, tipo: categoryType, codigo_reduzido: categoryAccountCode });
       if (activeCompanyIdRef.current !== companyId) return;
       setCategories(previous => [...previous.filter(c => c.id !== created.id), created]);
       updateRowField(rowId, 'categoria_id', created.id);
@@ -578,7 +579,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <form role="dialog" aria-modal="true" aria-labelledby="new-category-title" onSubmit={handleCreateCategory} className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg space-y-4">
             <h2 id="new-category-title" className="text-xl font-bold text-white">Nova categoria</h2>
-            <p className="text-sm text-slate-300">Disponível para as empresas do seu escritório. Ao salvar, será selecionada neste lançamento.</p>
+            <p className="text-sm text-slate-300">Nome amigável para o escritório, com vínculo contábil exclusivo de {company.nome_fantasia || company.razao_social}. Ao salvar, será selecionada neste lançamento.</p>
             <label className="block text-sm text-white">Nome da categoria
               <input autoFocus required maxLength={120} value={categoryName} onChange={e => setCategoryName(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-600 rounded p-2" placeholder="Ex.: Empréstimo recebido pela empresa" />
             </label>
@@ -589,11 +590,20 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                 <option value="imposto">Imposto</option><option value="folha">Folha de pagamento</option>
               </select>
             </label>
-            <p className="text-xs text-slate-400">O tipo não define automaticamente contas contábeis. Configure débito e crédito no Mapeador De/Para antes da exportação.</p>
+            <label className="block text-sm text-white">Código reduzido — conta contábil
+              <select required value={categoryAccountCode} onChange={e => setCategoryAccountCode(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-600 rounded p-2">
+                <option value="">Selecione a conta do plano desta empresa...</option>
+                {chartList.filter(c => c.tipo_conta === 'analitica' && !c.invalid).map(c => (
+                  <option key={c.id} value={c.codigo_conta}>{c.codigo_conta} — {c.nome_conta}</option>
+                ))}
+              </select>
+            </label>
+            {!chartList.some(c => c.tipo_conta === 'analitica' && !c.invalid) && <p role="alert" className="text-amber-300 text-sm">Importe o plano de contas válido desta empresa para selecionar o código reduzido.</p>}
+            <p className="text-xs text-slate-400">O código identifica a conta desta categoria. A partida completa de débito e crédito continua sendo configurada no Mapeador De/Para antes da exportação.</p>
             {categoryError && <p role="alert" className="text-red-300">{categoryError}</p>}
             <div className="flex justify-end gap-3">
               <button type="button" disabled={categorySaving} onClick={() => setCategoryRowId(null)} className="text-slate-300">Cancelar</button>
-              <button type="submit" disabled={categorySaving || !categoryName.trim()} className="bg-emerald-600 text-white rounded px-4 py-2 disabled:opacity-50">{categorySaving ? 'Salvando...' : 'Salvar e selecionar'}</button>
+              <button type="submit" disabled={categorySaving || !categoryName.trim() || !categoryAccountCode} className="bg-emerald-600 text-white rounded px-4 py-2 disabled:opacity-50">{categorySaving ? 'Salvando...' : 'Salvar e selecionar'}</button>
             </div>
           </form>
         </div>
@@ -1066,7 +1076,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                               value={row.categoria_id !== undefined ? row.categoria_id : (trn.categoria_id || '')}
                               onChange={(e) => {
                                 if (e.target.value === '__new_category__') {
-                                  setCategoryName(''); setCategoryType(trn.tipo === 'CREDITO' ? 'receita' : 'despesa');
+                                  setCategoryName(''); setCategoryAccountCode(''); setCategoryType(trn.tipo === 'CREDITO' ? 'receita' : 'despesa');
                                   setCategoryError(''); setCategoryRowId(trn.id);
                                 } else updateRowField(trn.id, 'categoria_id', e.target.value);
                               }}
@@ -1075,11 +1085,15 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                               <option value="">Selecione a categoria...</option>
                               {categories.map((c) => (
                                 <option key={c.id} value={c.id}>
-                                  {c.nome} {c.conta_debito_dominio ? `(${c.conta_debito_dominio}/${c.conta_credito_dominio})` : ''}
+                                  {c.nome} — {c.codigo_reduzido ? `Reduzido ${c.codigo_reduzido}${c.conta_nome ? '' : ' (conta ausente no plano)'}` : 'Sem código reduzido vinculado'}
                                 </option>
                               ))}
                               <option value="__new_category__">＋ Nova categoria...</option>
                             </select>
+                            <button type="button" disabled={isReconciled || categorySaving} onClick={() => {
+                              setCategoryName(''); setCategoryAccountCode(''); setCategoryType(trn.tipo === 'CREDITO' ? 'receita' : 'despesa');
+                              setCategoryError(''); setCategoryRowId(trn.id);
+                            }} className="mt-1 text-xs font-semibold text-blue-300 hover:text-blue-200 disabled:opacity-40">＋ Nova categoria</button>
                           </div>
 
                           {/* 3. Fornecedor / Cliente */}
