@@ -40,6 +40,8 @@ async function call(method,{query={},body={},params={},identity=user}={}){let re
   assert.equal((await call('createCategory',{body:{...body,codigo_reduzido:'702'}})).code,400);
   assert.equal((await call('createCategory',{body:{...body,codigo_reduzido:'500'}})).code,400);
   assert.equal((await call('createCategory',{body:{...body,codigo_reduzido:''}})).code,400);
+  db.exec("INSERT INTO dominio_chart_of_accounts VALUES ('pdf-object','a','13','0','obj','analitica','','')");
+  assert.equal((await call('createCategory',{body:{...body,codigo_reduzido:'13'}})).code,400);
   const linked=await call('createCategory',{body:{...body,codigo_reduzido:'501'}});
   assert.equal(linked.result.data.codigo_reduzido,'501');
   const other=await call('createCategory',{body:{...body,company_id:'same-office',codigo_reduzido:'702'}});

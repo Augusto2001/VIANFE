@@ -230,7 +230,9 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       setTransactions(resTrn.data || []);
       setSummary(resTrn.summary || {});
       setCategories(resCat || []);
-      const invalidAccount = (c: any) => /[\ufffd\u0000-\u0008]|%PDF-|\/FontBBox|endstream/i.test(c.nome_conta || '');
+      const invalidAccount = (c: any) => !/^\d+$/.test(c.codigo_conta || '') ||
+        /[\ufffd\u0000-\u001f\u007f]|%PDF-|\/FontBBox|endstream/i.test(c.nome_conta || '') ||
+        /^(?:obj|endobj|stream|endstream|xref)$/i.test((c.nome_conta || '').trim());
       setInvalidChartCount((resChart || []).filter(invalidAccount).length);
       setChartList((resChart || []).map((c: any) => invalidAccount(c) ? { ...c, invalid: true, nome_conta: '[Nome ilegível — reimporte o plano de contas]' } : c));
       setProvisionsList(resProv || []);

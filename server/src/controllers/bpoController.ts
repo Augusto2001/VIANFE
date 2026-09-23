@@ -403,7 +403,8 @@ export const bpoController = {
         const account = typeof codigo_reduzido === 'string' && db.prepare(
           'SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?'
         ).get(company_id, codigo_reduzido.trim()) as any;
-        if (!account || account.tipo_conta !== 'analitica' || !isReadableFinancialText(account.nome_conta)) {
+        if (!account || !/^\d+$/.test(account.codigo_conta) || account.tipo_conta !== 'analitica' ||
+            !isReadableFinancialText(account.nome_conta) || /^(?:obj|endobj|stream|endstream|xref)$/i.test(account.nome_conta.trim())) {
           res.status(400).json({ error: 'Selecione um código reduzido de conta analítica válida do plano desta empresa.' }); return;
         }
       }
