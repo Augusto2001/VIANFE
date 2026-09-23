@@ -6,6 +6,21 @@ import { PDFParse } from 'pdf-parse';
 import { predictiveAlertsService } from '../services/predictiveAlertsService.js';
 import { openFinanceService } from '../services/openFinanceService.js';
 
+import { AuthenticatedRequest } from '../middleware/authMiddleware.js';
+import { isReadableFinancialText, reconciliationSummary } from '../services/bpoValidation.js';
+
+function canAccessCompany(req: Request, res: Response, companyId: unknown): boolean {
+  const user = (req as AuthenticatedRequest).user;
+  const company = typeof companyId === 'string' && user && db.prepare(
+    'SELECT id FROM companies WHERE id = ? AND tenant_id = ?'
+  ).get(companyId, user.tenant_id);
+  const assigned = user && (user.role === 'admin' || db.prepare(
+    'SELECT company_id FROM user_companies WHERE user_id = ? AND company_id = ?'
+  ).get(user.id, String(companyId)));
+  if (!company || !assigned) { res.status(403).json({ error: 'Empresa não autorizada' }); return false; }
+  return true;
+}
+
 export const bpoController = {
   // 1. List bank accounts
   async getAccounts(req: Request, res: Response): Promise<void> {
@@ -235,6 +250,8 @@ export const bpoController = {
         return;
       }
 
+      if (!canAccessCompany(req, res, company_id)) return;
+
       let sql = `
         SELECT 
           t.*,
@@ -257,7 +274,7 @@ export const bpoController = {
       const params: any[] = [company_id];
 
       if (status === 'pending') {
-        sql += ' AND t.conciliado = 0';
+        sql += ' AND (t.conciliado = 0 OR t.conciliado IS NULL)';
       } else if (status === 'reconciled') {
         sql += ' AND t.conciliado = 1';
       }
@@ -266,25 +283,9 @@ export const bpoController = {
 
       const transactions = db.prepare(sql).all(...params) as any[];
 
-      // Calculate summary metrics
-      const totalCount = transactions.length;
-      const reconciledCount = transactions.filter(t => t.conciliado === 1).length;
-      const pendingCount = totalCount - reconciledCount;
-      const totalEntradas = transactions.filter(t => t.tipo === 'CREDITO').reduce((acc, t) => acc + (t.valor || 0), 0);
-      const totalSaidas = transactions.filter(t => t.tipo === 'DEBITO').reduce((acc, t) => acc + (t.valor || 0), 0);
-      const saldoLiquido = totalEntradas - totalSaidas;
-
       res.json({
         success: true,
-        summary: {
-          totalCount,
-          reconciledCount,
-          pendingCount,
-          reconciledPercent: totalCount > 0 ? Math.round((reconciledCount / totalCount) * 100) : 100,
-          totalEntradas,
-          totalSaidas,
-          saldoLiquido
-        },
+        summary: reconciliationSummary(db, String(company_id)),
         data: transactions
       });
     } catch (err: any) {
@@ -314,6 +315,8 @@ export const bpoController = {
         return;
       }
 
+      if (!canAccessCompany(req, res, trn.company_id)) return;
+
       if (desconciliar) {
         db.prepare(`
           UPDATE bank_transactions 
@@ -327,6 +330,14 @@ export const bpoController = {
       }
 
       const finalCatId = categoria_id || trn.categoria_id;
+      const tenantId = (req as AuthenticatedRequest).user!.tenant_id;
+      const category = finalCatId && db.prepare('SELECT * FROM financial_categories WHERE id = ? AND tenant_id = ?').get(finalCatId, tenantId) as any;
+      if (!category || !isReadableFinancialText(category.nome)) {
+        res.status(400).json({ error: 'Selecione uma categoria financeira válida ou cadastre uma nova.' }); return;
+      }
+      if (invoice_id && !db.prepare('SELECT id FROM invoices WHERE id = ? AND company_id = ?').get(invoice_id, trn.company_id)) {
+        res.status(400).json({ error: 'Nota não pertence à empresa desta transação.' }); return;
+      }
       const finalInvId = invoice_id !== undefined ? invoice_id : trn.invoice_id;
       const finalDesc = descricao_custom || trn.descricao_custom || trn.descricao_original;
       const finalFornecedor = fornecedor_cliente_nome !== undefined ? fornecedor_cliente_nome : trn.fornecedor_cliente_nome;
@@ -353,8 +364,8 @@ export const bpoController = {
         const ruleId = uuidv4();
         db.prepare(`
           INSERT INTO reconciliation_rules (id, tenant_id, padrao_descricao, categoria_id, auto_match, created_at)
-          VALUES (?, 'tenant_viacont_master', ?, ?, 1, datetime('now'))
-        `).run(ruleId, cleanDesc.trim(), finalCatId);
+          VALUES (?, ?, ?, ?, 1, datetime('now'))
+        `).run(ruleId, tenantId, cleanDesc.trim(), finalCatId);
       }
 
       const updated = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id);
@@ -367,11 +378,31 @@ export const bpoController = {
   // 6. List financial categories
   async getCategories(req: Request, res: Response): Promise<void> {
     try {
-      const categories = db.prepare('SELECT * FROM financial_categories ORDER BY codigo ASC').all();
+      const categories = db.prepare('SELECT * FROM financial_categories WHERE tenant_id = ? ORDER BY codigo ASC').all((req as AuthenticatedRequest).user!.tenant_id);
       res.json({ success: true, data: categories });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  },
+
+  async createCategory(req: Request, res: Response): Promise<void> {
+    try {
+      const user = (req as AuthenticatedRequest).user!;
+      const { company_id, nome, tipo } = req.body;
+      if (!canAccessCompany(req, res, company_id)) return;
+      if (!isReadableFinancialText(nome) || nome.trim().length > 120 ||
+          !['receita', 'despesa', 'imposto', 'folha', 'transferencia', 'emprestimo'].includes(tipo)) {
+        res.status(400).json({ error: 'Informe um nome legível de até 120 caracteres e um tipo válido.' }); return;
+      }
+      const normalized = nome.trim().replace(/\s+/g, ' ');
+      const categories = db.prepare('SELECT * FROM financial_categories WHERE tenant_id = ?').all(user.tenant_id) as any[];
+      const existing = categories.find(c => c.tipo === tipo && c.nome.trim().toLocaleLowerCase('pt-BR') === normalized.toLocaleLowerCase('pt-BR'));
+      if (existing) { res.json({ success: true, data: existing }); return; }
+      const id = uuidv4();
+      db.prepare(`INSERT INTO financial_categories (id, tenant_id, codigo, nome, tipo, created_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(id, user.tenant_id, `CUSTOM-${id}`, normalized, tipo);
+      res.status(201).json({ success: true, data: db.prepare('SELECT * FROM financial_categories WHERE id = ?').get(id) });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
   },
 
   // 7. BUSINESS SUCCESS DASHBOARD & RISK RADAR (+30 KPIs & Real-Time Closing)
@@ -542,6 +573,7 @@ export const bpoController = {
         return;
       }
 
+      if (!canAccessCompany(req, res, company_id)) return;
       const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(company_id as string) as any;
       const transactions = db.prepare(`
         SELECT t.*, c.conta_debito_dominio, c.conta_credito_dominio, c.nome as cat_nome
@@ -551,6 +583,10 @@ export const bpoController = {
         ORDER BY t.data ASC
       `).all(company_id as string) as any[];
 
+      const missingMappings = transactions.filter(t => !t.conta_debito_dominio || !t.conta_credito_dominio);
+      if (missingMappings.length) {
+        res.status(400).json({ error: `${missingMappings.length} lançamento(s) sem mapeamento de débito/crédito. Configure o Mapeador De/Para antes de exportar.` }); return;
+      }
       // Format in Domínio Sistemas Layout:
       // DATA | CONTA DEBITO | CONTA CREDITO | VALOR | COD_HISTORICO | COMPLEMENTO
       let fileContent = `|DOMINIO_SISTEMAS_CONTABILIDADE_VIACONT|\n`;
@@ -559,8 +595,8 @@ export const bpoController = {
 
       for (const t of transactions) {
         const dataFormatada = t.data.split('-').reverse().join('/'); // DD/MM/YYYY
-        const contaDebito = t.conta_debito_dominio || (t.tipo === 'DEBITO' ? '4.1.01.01' : '1.1.01.01');
-        const contaCredito = t.conta_credito_dominio || (t.tipo === 'DEBITO' ? '1.1.01.01' : '3.1.01.01');
+        const contaDebito = t.conta_debito_dominio;
+        const contaCredito = t.conta_credito_dominio;
         const valorFormatado = t.valor.toFixed(2).replace('.', ',');
         const historico = `VLR REF ${t.descricao_original.substring(0, 40)}`;
 
@@ -597,10 +633,11 @@ export const bpoController = {
         return;
       }
 
-      if (replace_existing) {
-        db.prepare('DELETE FROM dominio_chart_of_accounts WHERE company_id = ?').run(company_id);
+      if (!canAccessCompany(req, res, company_id)) return;
+      if (!isReadableFinancialText(raw_content)) {
+        res.status(400).json({ error: 'Plano inválido: envie TXT/CSV legível exportado pelo Domínio. PDF ou conteúdo binário não é aceito aqui.' }); return;
       }
-
+      const parsedAccounts: any[][] = [];
       const lines = raw_content.split(/\r?\n/).map((l: string) => l.trim()).filter((l: string) => l.length > 0);
       let imported = 0;
 
@@ -651,7 +688,7 @@ export const bpoController = {
           let classificacao = '';
           let nome = '';
           let tipo = 'analitica';
-          let natureza = 'D';
+          let natureza = '';
 
           // Detecta qual parte é a classificação estruturada (tem pontos como 1.1.01...)
           const classIdx = parts.findIndex((p: string) => /^[\d.]+$/.test(p) && p.includes('.'));
@@ -667,27 +704,25 @@ export const bpoController = {
               codigo = parts[0];
               classificacao = parts[1];
               nome = parts[2];
-              natureza = parts[3] || 'D';
+              natureza = '';
             } else if (parts[0].includes('.') && /^\d+$/.test(parts[1])) {
               classificacao = parts[0];
               codigo = parts[1];
               nome = parts[2];
-              natureza = parts[3] || 'D';
+              natureza = '';
             } else {
               codigo = parts[0];
               classificacao = parts[1];
               nome = parts[2];
-              natureza = parts[3] || 'D';
+              natureza = '';
             }
           }
 
-          if (codigo && classificacao && nome) {
+          if (/^\d+$/.test(codigo) && /^\d+(?:\.\d+)*$/.test(classificacao) && isReadableFinancialText(nome)) {
             // Natureza
             const natPart = parts.find((p: string) => p.toUpperCase() === 'C' || p.toUpperCase() === 'CREDORA' || p.toUpperCase() === 'D' || p.toUpperCase() === 'DEVEDORA');
             if (natPart) {
               natureza = natPart.toUpperCase().startsWith('C') ? 'C' : 'D';
-            } else {
-              natureza = (classificacao.startsWith('2') || classificacao.startsWith('3')) ? 'C' : 'D';
             }
 
             // Tipo
@@ -696,16 +731,24 @@ export const bpoController = {
               tipo = typePart.toUpperCase().startsWith('S') ? 'sintetica' : 'analitica';
             }
 
-            // Inserir se não existir
-            const exists = db.prepare('SELECT id FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?').get(company_id, codigo);
-            if (!exists) {
-              insertStmt.run(uuidv4(), company_id, codigo, classificacao, nome, tipo, natureza);
-              imported++;
-            }
+            parsedAccounts.push([codigo, classificacao, nome, tipo, natureza]);
           }
         }
       }
 
+      if (!parsedAccounts.length) {
+        res.status(400).json({ error: 'Nenhuma conta válida encontrada. O plano anterior foi preservado.' }); return;
+      }
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (replace_existing) db.prepare('DELETE FROM dominio_chart_of_accounts WHERE company_id = ?').run(company_id);
+        for (const [codigo, classificacao, nome, tipo, natureza] of parsedAccounts) {
+          if (!db.prepare('SELECT id FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?').get(company_id, codigo)) {
+            insertStmt.run(uuidv4(), company_id, codigo, classificacao, nome, tipo, natureza); imported++;
+          }
+        }
+        db.exec('COMMIT');
+      } catch (err) { db.exec('ROLLBACK'); throw err; }
       res.json({ success: true, message: `${imported} contas contábeis importadas com sucesso!`, count: imported });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -950,6 +993,11 @@ export const bpoController = {
         return;
       }
 
+      if (!canAccessCompany(req, res, company_id)) return;
+      const accounts = db.prepare('SELECT nome_conta FROM dominio_chart_of_accounts WHERE company_id = ?').all(company_id as string) as any[];
+      if (accounts.some(account => !isReadableFinancialText(account.nome_conta))) {
+        res.status(400).json({ error: 'O plano contém nomes ilegíveis. Reimporte o TXT/CSV válido antes do mapeamento automático.' }); return;
+      }
       const result = await openFinanceService.autoMapChartOfAccounts(company_id as string);
       res.json({
         success: true,
@@ -966,6 +1014,10 @@ export const bpoController = {
       const id = String(req.params.id);
       const { conta_debito_dominio, conta_credito_dominio } = req.body;
 
+      const tenantId = (req as AuthenticatedRequest).user!.tenant_id;
+      if (!db.prepare('SELECT id FROM financial_categories WHERE id = ? AND tenant_id = ?').get(id, tenantId)) {
+        res.status(404).json({ error: 'Categoria não encontrada' }); return;
+      }
       db.prepare(`
         UPDATE financial_categories 
         SET conta_debito_dominio = ?, conta_credito_dominio = ?

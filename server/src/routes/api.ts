@@ -67,6 +67,7 @@ router.post('/bpo/upload-statement', verifyJwtAndTenant, bpoController.uploadSta
 router.get('/bpo/transactions', verifyJwtAndTenant, bpoController.getTransactions);
 router.post('/bpo/reconcile/:id', verifyJwtAndTenant, bpoController.reconcileTransaction);
 router.get('/bpo/categories', verifyJwtAndTenant, bpoController.getCategories);
+router.post('/bpo/categories', verifyJwtAndTenant, bpoController.createCategory);
 router.get('/bpo/business-success', verifyJwtAndTenant, bpoController.getBusinessSuccessKpis);
 router.get('/bpo/export-dominio', verifyJwtAndTenant, bpoController.exportDominioBatches);
 

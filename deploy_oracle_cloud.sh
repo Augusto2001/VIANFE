@@ -19,7 +19,7 @@ fi
 # O build usa dependências do lockfile e imagem Node identificada por digest.
 node_image='node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1'
 sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'npm --prefix server ci && npm --prefix client ci && npm --prefix server run build && npm --prefix client run build'
-sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'node server/tests/science-protocol.cjs && node server/tests/scheduler-ciencia.cjs && node server/tests/no-simulated-success.cjs && node server/tests/bank-import.cjs'
+sudo -n docker run --rm -v /home/opc/vianfe:/work -w /work "$node_image" sh -c 'node server/tests/science-protocol.cjs && node server/tests/scheduler-ciencia.cjs && node server/tests/no-simulated-success.cjs && node server/tests/bank-import.cjs && node server/tests/bpo-reconciliation.cjs'
 [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$sha" ]] || { echo 'GitHub mudou durante o build'; exit 1; }
 old_image=$(sudo -n docker inspect vianfe-api --format '{{.Image}}')
 sudo -n docker tag "$old_image" "vianfe-recovery:before-${sha:0:12}"

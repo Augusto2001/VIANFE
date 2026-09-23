@@ -19,6 +19,13 @@ interface BankReconciliationViewProps {
 export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ company }) => {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoryRowId, setCategoryRowId] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState('');
+  const [categoryType, setCategoryType] = useState('despesa');
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const requestSequence = React.useRef(0);
   const [summary, setSummary] = useState<any>({
     totalCount: 0,
     reconciledCount: 0,
@@ -61,6 +68,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   const [replaceExistingChart, setReplaceExistingChart] = useState(true);
   const [chartAccountSearch, setChartAccountSearch] = useState('');
   const [chartList, setChartList] = useState<any[]>([]);
+  const [invalidChartCount, setInvalidChartCount] = useState(0);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartMsg, setChartMsg] = useState('');
   const chartFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -202,6 +210,8 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
 
   const loadData = async () => {
     const currentCompanyId = company.id;
+    const requestId = ++requestSequence.current;
+    setLoadError('');
     try {
       setLoading(true);
       const [resTrn, resCat, resChart, resProv, resInv] = await Promise.all([
@@ -212,20 +222,22 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         api.getInvoices({ company_id: company.id, limit: 100 }).catch(() => ({ invoices: [] }))
       ]);
 
-      if (activeCompanyIdRef.current !== currentCompanyId) {
+      if (activeCompanyIdRef.current !== currentCompanyId || requestId !== requestSequence.current) {
         return; // Discard stale response from prior company
       }
 
       setTransactions(resTrn.data || []);
       setSummary(resTrn.summary || {});
       setCategories(resCat || []);
-      setChartList(resChart || []);
+      const invalidAccount = (c: any) => /[\ufffd\u0000-\u0008]|%PDF-|\/FontBBox|endstream/i.test(c.nome_conta || '');
+      setInvalidChartCount((resChart || []).filter(invalidAccount).length);
+      setChartList((resChart || []).map((c: any) => invalidAccount(c) ? { ...c, nome_conta: '[Nome ilegível — reimporte o plano de contas]' } : c));
       setProvisionsList(resProv || []);
       setCompanyInvoices(resInv.invoices || []);
     } catch (err: any) {
-      console.error('Erro ao carregar conciliação:', err);
+      if (requestId === requestSequence.current) setLoadError(err.message || 'Falha ao carregar conciliação');
     } finally {
-      if (activeCompanyIdRef.current === currentCompanyId) {
+      if (activeCompanyIdRef.current === currentCompanyId && requestId === requestSequence.current) {
         setLoading(false);
       }
     }
@@ -233,6 +245,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
 
   useEffect(() => {
     activeCompanyIdRef.current = company.id;
+    setCategoryRowId(null);
     // Immediate state reset on company change to eliminate cross-company contamination
     setTransactions([]);
     setSummary({
@@ -245,10 +258,28 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       saldoLiquido: 0
     });
     setChartList([]);
+    setInvalidChartCount(0);
     setProvisionsList([]);
     setCompanyInvoices([]);
     loadData();
   }, [company.id, filterStatus]);
+
+  const handleCreateCategory = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const companyId = company.id;
+    const rowId = categoryRowId;
+    if (!rowId || categorySaving) return;
+    setCategorySaving(true); setCategoryError('');
+    try {
+      const created = await api.createBpoCategory({ company_id: companyId, nome: categoryName, tipo: categoryType });
+      if (activeCompanyIdRef.current !== companyId) return;
+      setCategories(previous => [...previous.filter(c => c.id !== created.id), created]);
+      updateRowField(rowId, 'categoria_id', created.id);
+      setCategoryRowId(null);
+    } catch (err: any) {
+      if (activeCompanyIdRef.current === companyId) setCategoryError(err.message);
+    } finally { setCategorySaving(false); }
+  };
 
   const handleReconcileQuick = async (trn: any) => {
     try {
@@ -364,33 +395,23 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     }
   };
 
-  const processChartFile = (file: File) => {
-    setSelectedChartFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      let text = event.target?.result as string;
-      if (text) {
-        setChartContent(text);
-        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-        setChartFileLinesCount(lines.length);
-        setChartMsg(`✓ Arquivo "${file.name}" lido com sucesso (${lines.length} linhas detectadas). Clique em "Importar Plano de Contas" para salvar.`);
+  const processChartFile = async (file: File) => {
+    setChartContent(''); setChartFileLinesCount(0); setSelectedChartFileName(file.name);
+    try {
+      const buffer = await file.arrayBuffer();
+      const signature = new TextDecoder().decode(buffer.slice(0, 1024));
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name) || signature.includes('%PDF-')) {
+        throw new Error('Envie o plano de contas em TXT/CSV exportado pelo Domínio. PDF não é aceito neste importador.');
       }
-    };
-    reader.onerror = () => {
-      // Fallback para leitura ISO-8859-1 (arquivos legados da Domínio em ANSI)
-      const readerAnsi = new FileReader();
-      readerAnsi.onload = (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          setChartContent(text);
-          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-          setChartFileLinesCount(lines.length);
-          setChartMsg(`✓ Arquivo "${file.name}" lido com sucesso em ANSI (${lines.length} linhas).`);
-        }
-      };
-      readerAnsi.readAsText(file, 'ISO-8859-1');
-    };
-    reader.readAsText(file, 'utf-8');
+      let text: string;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(buffer); }
+      catch { text = new TextDecoder('windows-1252').decode(buffer); }
+      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]/.test(text)) throw new Error('Arquivo binário ou ilegível. Exporte novamente em TXT/CSV.');
+      setChartContent(text);
+      const count = text.split(/\r?\n/).filter(line => line.trim()).length;
+      setChartFileLinesCount(count);
+      setChartMsg(`Arquivo lido (${count} linhas). A estrutura será validada antes de salvar.`);
+    } catch (err: any) { setChartMsg(`Erro: ${err.message}`); }
   };
 
   const handleChartFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -551,6 +572,32 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   return (
     <div className="space-y-6">
       
+      {loadError && <div role="alert" className="p-4 border border-red-500 rounded-xl text-red-300">Não foi possível carregar os dados: {loadError}</div>}
+      {invalidChartCount > 0 && <div role="alert" className="p-4 border border-amber-500 rounded-xl text-amber-200">O plano contábil contém {invalidChartCount} conta(s) com nome ilegível. Reimporte um TXT/CSV válido do Domínio antes de usar o mapeamento automático. Os registros existentes foram preservados.</div>}
+      {categoryRowId && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <form role="dialog" aria-modal="true" aria-labelledby="new-category-title" onSubmit={handleCreateCategory} className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg space-y-4">
+            <h2 id="new-category-title" className="text-xl font-bold text-white">Nova categoria</h2>
+            <p className="text-sm text-slate-300">Disponível para as empresas do seu escritório. Ao salvar, será selecionada neste lançamento.</p>
+            <label className="block text-sm text-white">Nome da categoria
+              <input autoFocus required maxLength={120} value={categoryName} onChange={e => setCategoryName(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-600 rounded p-2" placeholder="Ex.: Empréstimo recebido pela empresa" />
+            </label>
+            <label className="block text-sm text-white">Tipo
+              <select value={categoryType} onChange={e => setCategoryType(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-600 rounded p-2">
+                <option value="receita">Receita</option><option value="despesa">Despesa</option>
+                <option value="emprestimo">Empréstimo / financiamento</option><option value="transferencia">Transferência</option>
+                <option value="imposto">Imposto</option><option value="folha">Folha de pagamento</option>
+              </select>
+            </label>
+            <p className="text-xs text-slate-400">O tipo não define automaticamente contas contábeis. Configure débito e crédito no Mapeador De/Para antes da exportação.</p>
+            {categoryError && <p role="alert" className="text-red-300">{categoryError}</p>}
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={categorySaving} onClick={() => setCategoryRowId(null)} className="text-slate-300">Cancelar</button>
+              <button type="submit" disabled={categorySaving || !categoryName.trim()} className="bg-emerald-600 text-white rounded px-4 py-2 disabled:opacity-50">{categorySaving ? 'Salvando...' : 'Salvar e selecionar'}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {/* Top Header Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
@@ -623,7 +670,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
 
             {/* Export Domínio */}
             <button
-              onClick={() => api.exportDominioBatches(company.id)}
+              onClick={() => api.exportDominioBatches(company.id).catch(err => alert(err.message))}
               className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
               title="Exportar lote contábil TXT no layout oficial da Domínio Sistemas"
             >
@@ -647,15 +694,15 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-800/80">
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Lançamentos</span>
-            <p className="text-xl font-black text-white mt-0.5">{summary.totalCount || 0}</p>
+            <p className="text-xl font-black text-white mt-0.5">{loading || loadError ? '—' : (summary.totalCount ?? 0)}</p>
           </div>
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800">
-            <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Conciliados (Domínio)</span>
-            <p className="text-xl font-black text-emerald-400 mt-0.5">{summary.reconciledCount || 0} ({summary.reconciledPercent || 0}%)</p>
+            <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Conciliados no ViaNFe</span>
+            <p className="text-xl font-black text-emerald-400 mt-0.5">{loading || loadError ? '—' : (summary.reconciledCount ?? 0)} ({loading || loadError ? '—' : (summary.reconciledPercent ?? 0)}%)</p>
           </div>
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800">
             <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Pendentes de Match</span>
-            <p className="text-xl font-black text-amber-400 mt-0.5">{summary.pendingCount || 0}</p>
+            <p className="text-xl font-black text-amber-400 mt-0.5">{loading || loadError ? '—' : (summary.pendingCount ?? 0)}</p>
           </div>
           <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800">
             <span className="text-[10px] uppercase font-bold text-teal-400 tracking-wider">Provisões Geradas</span>
@@ -731,7 +778,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
               filterStatus === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Pendentes ({summary.pendingCount || 0})
+            Pendentes ({loading || loadError ? '—' : (summary.pendingCount ?? 0)})
           </button>
           <button
             onClick={() => setFilterStatus('reconciled')}
@@ -739,7 +786,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
               filterStatus === 'reconciled' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Conciliados ({summary.reconciledCount || 0})
+            Conciliados ({loading || loadError ? '—' : (summary.reconciledCount ?? 0)})
           </button>
           <button
             onClick={() => setFilterStatus('all')}
@@ -747,7 +794,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
               filterStatus === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
             }`}
           >
-            Todos ({summary.totalCount || 0})
+            Todos ({loading || loadError ? '—' : (summary.totalCount ?? 0)})
           </button>
         </div>
 
@@ -926,7 +973,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                           <span>{reconcilingId === trn.id ? 'Gravando...' : 'Conciliar'}</span>
                         </button>
                         <span className="text-[10px] text-slate-400 text-center font-medium">
-                          Grava na Domínio
+                          Registra no ViaNFe
                         </span>
                       </div>
                     )}
@@ -1017,7 +1064,12 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                             <select
                               disabled={isReconciled}
                               value={row.categoria_id !== undefined ? row.categoria_id : (trn.categoria_id || '')}
-                              onChange={(e) => updateRowField(trn.id, 'categoria_id', e.target.value)}
+                              onChange={(e) => {
+                                if (e.target.value === '__new_category__') {
+                                  setCategoryName(''); setCategoryType(trn.tipo === 'CREDITO' ? 'receita' : 'despesa');
+                                  setCategoryError(''); setCategoryRowId(trn.id);
+                                } else updateRowField(trn.id, 'categoria_id', e.target.value);
+                              }}
                               className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none truncate"
                             >
                               <option value="">Selecione a categoria...</option>
@@ -1026,15 +1078,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
                                   {c.nome} {c.conta_debito_dominio ? `(${c.conta_debito_dominio}/${c.conta_credito_dominio})` : ''}
                                 </option>
                               ))}
-                              {chartList.length > 0 && (
-                                <optgroup label="Plano de Contas Domínio">
-                                  {chartList.filter(c => c.classificacao && c.classificacao.length > 2).slice(0, 30).map(c => (
-                                    <option key={c.id} value={c.id}>
-                                      {c.codigo_reduzido ? `[${c.codigo_reduzido}] ` : ''}{c.nome_conta}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              )}
+                              <option value="__new_category__">＋ Nova categoria...</option>
                             </select>
                           </div>
 

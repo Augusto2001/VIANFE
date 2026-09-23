@@ -472,6 +472,15 @@ export const api = {
     return json;
   },
 
+  async createBpoCategory(data: { company_id: string; nome: string; tipo: string }): Promise<any> {
+    const res = await fetch(`${API_BASE}/bpo/categories`, {
+      method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data)
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || 'Falha ao cadastrar categoria');
+    return json.data;
+  },
+
   async getBpoCategories(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/bpo/categories`, { headers: getAuthHeaders() });
     const json = await res.json();
@@ -528,6 +537,10 @@ export const api = {
 
   async exportDominioBatches(companyId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/bpo/export-dominio?company_id=${companyId}`, { headers: getAuthHeaders() });
+    if (!res.ok) {
+      const json = await res.json();
+      throw new Error(json.error || 'Não foi possível exportar os lançamentos');
+    }
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');

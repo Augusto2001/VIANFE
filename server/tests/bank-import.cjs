@@ -15,5 +15,6 @@ assert.equal(transaction(ofx).valor,1234.56);assert.equal(transaction(ofx).tipo,
 const csv='19/09/2026;PIX RECEBIDO;100,00;900,00';assert.equal(transaction(csv).id,transaction(csv).id);
 let writes=0;const exportsObject={};
 const stubs={'../database/db.js':{db:{prepare:sql=>{assert.match(sql,/^SELECT/);return {all:()=>[],run:()=>{writes++;throw Error('Unexpected write')}}}}},'uuid':{v4:()=>{throw Error('Unexpected account creation')}},'../services/ofxParser.js':{parseOfx},'pdf-parse':{},'../services/predictiveAlertsService.js':{},'../services/openFinanceService.js':{}};
+stubs['../services/bpoValidation.js']=require('../dist/services/bpoValidation.js');
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/controllers/bpoController.js'),'utf8'),{exports:exportsObject,require:n=>{assert.ok(n in stubs,n);return stubs[n]},console});
 (async()=>{let body;const res={status:()=>res,json:x=>{body=x}};await exportsObject.bpoController.getAccounts({query:{company_id:'offline-fixture'}},res);assert.equal(body.success,true);assert.equal(body.data.length,0);assert.equal(writes,0);console.log('PASS: date/value separation, transaction D/C, signs, missing year, balances, OFX whitespace/SGML, stable IDs and no fictitious account.');})().catch(e=>{console.error(e);process.exitCode=1});
