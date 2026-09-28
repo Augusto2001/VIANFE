@@ -224,8 +224,8 @@ export const api = {
       headers: getAuthHeaders(),
       body: formData,
     });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message);
+    const json = await res.json().catch(() => { throw new Error(`Falha HTTP ${res.status}: resposta inválida do servidor.`); });
+    if (!res.ok || !json.success) throw new Error(json.message || `Falha HTTP ${res.status}`);
     return json;
   },
 

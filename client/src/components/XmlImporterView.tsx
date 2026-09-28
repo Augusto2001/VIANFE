@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Company } from '../types';
 import { api } from '../services/api';
+import { importFiscalFiles } from '../services/xmlUpload.js';
 import { 
   UploadCloud, 
   FileCode, 
@@ -35,6 +36,7 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState('');
   const [result, setResult] = useState<{ processed: number; errors?: string[] } | null>(null);
 
   // Plano de Contas State
@@ -121,15 +123,16 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
     e.stopPropagation();
     setDragActive(false);
 
+    if (uploading) return;
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const filesArray = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.xml'));
+      const filesArray = Array.from(e.dataTransfer.files);
       setSelectedFiles(filesArray);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const filesArray = Array.from(e.target.files).filter(f => f.name.endsWith('.xml'));
+      const filesArray = Array.from(e.target.files);
       setSelectedFiles(filesArray);
     }
   };
@@ -141,7 +144,7 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
     }
 
     if (selectedFiles.length === 0) {
-      alert('Selecione ao menos um arquivo .xml para importar.');
+      alert('Selecione ao menos um arquivo XML ou ZIP para importar.');
       return;
     }
 
@@ -149,9 +152,11 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
       setUploading(true);
       setResult(null);
 
-      const res = await api.uploadBatchXml(selectedCompany.id, selectedFiles);
+      setProgress('Lendo arquivos...');
+      const companyId = selectedCompany.id;
+      const res = await importFiscalFiles(selectedFiles, (file: File) => api.uploadBatchXml(companyId, [file]),
+        (attempted: number, processed: number) => setProgress(`${attempted} arquivo(s) enviado(s); ${processed} processado(s)`));
       setResult(res);
-      confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
       setSelectedFiles([]);
       onImportSuccess();
     } catch (err: any) {
@@ -263,7 +268,7 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
               id="xml-file-input"
               type="file"
               multiple
-              accept=".xml"
+              accept=".xml,.XML,.zip,.ZIP" disabled={uploading}
               onChange={handleFileChange}
               className="hidden"
             />
@@ -273,7 +278,7 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
             </div>
 
             <h3 className="text-sm font-semibold text-white">
-              Clique para selecionar ou arraste seus arquivos .xml aqui
+              Clique para selecionar ou arraste seus arquivos XML ou ZIP aqui
             </h3>
             <p className="text-xs text-slate-400 mt-1">
               Suporta múltiplos arquivos XML de NFe (Mod 55), NFCe (Mod 65) e CTe (Mod 57).
@@ -301,7 +306,7 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
                 {uploading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processando e Gerando DANFEs...</span>
+                    <span>{progress || 'Processando arquivos...'}</span>
                   </>
                 ) : (
                   <>
@@ -318,10 +323,10 @@ export const XmlImporterView: React.FC<XmlImporterViewProps> = ({
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs space-y-2 animate-fade-in">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Importação Concluída com Sucesso!</span>
+                <span>{result.errors?.length ? 'Importação finalizada com pendências' : 'Importação concluída'}</span>
               </div>
               <p>
-                {result.processed} nota(s) fiscal(is) processada(s), salvas e com DANFE gerado no perfil de <strong>{selectedCompany?.razao_social}</strong>.
+                {result.processed} nota(s) fiscal(is) processada(s) para a empresa selecionada <strong>{selectedCompany?.razao_social}</strong>.
               </p>
               {result.errors && result.errors.length > 0 && (
                 <div className="mt-2 text-rose-300 space-y-1">
