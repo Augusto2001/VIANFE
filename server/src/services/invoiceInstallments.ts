@@ -13,6 +13,16 @@ export function syncXmlInstallments(db: DatabaseSync, invoiceId: string, company
   db.exec('SAVEPOINT xml_installments');
   try {
     const existing = db.prepare('SELECT * FROM invoice_installments WHERE invoice_id = ?').all(invoiceId) as any[];
+    // Exact fingerprint of the old automatically invented single boleto.
+    // Only cancel it when the full XML explicitly says Sem Pagamento and has no duplicata.
+    if (!valid.length && parsed.pagamentos?.length && parsed.pagamentos.every(p => p.formaCodigo === '90')) {
+      for (const row of existing) {
+        if (row.status === 'pendente' && row.numero_parcela === '001' && row.forma_pagamento === 'Boleto / Duplicata' &&
+            row.valor === parsed.totais.valorTotal && [parsed.dataEmissao, parsed.dataSaidaEntrada].includes(row.data_vencimento)) {
+          db.prepare("UPDATE invoice_installments SET status='cancelado' WHERE id=? AND status='pendente'").run(row.id);
+        }
+      }
+    }
     for (const dup of valid) {
       const rows = existing.filter(row => row.numero_parcela === dup.numero);
       // Settled/reconciled obligations retain their identity and financial history.

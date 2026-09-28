@@ -19,4 +19,11 @@ assert.deepEqual(db.prepare('SELECT * FROM invoice_installments WHERE id=?').get
 p.duplicatas[1].vencimento='';
 assert.throws(()=>syncXmlInstallments(db,'note','company','entrada',p),/vencimento/);
 assert.equal(db.prepare('SELECT count(*) n FROM invoice_installments').get().n,2);
-db.close();console.log('PASS: real XML installments, no inferred date, repeat-safe ingestion and preserved paid history.');
+db.exec("INSERT INTO invoice_installments (id,invoice_id,numero_parcela,data_vencimento,valor,status,forma_pagamento) VALUES ('legacy','no-payment','001','2026-09-22T17:00:00',100,'pendente','Boleto / Duplicata')");
+const noPayment={...p,duplicatas:[],pagamentos:[{formaCodigo:'90',forma:'Sem Pagamento',valor:0}],totais:{valorTotal:100},dataEmissao:'2026-09-22T17:00:00'};
+syncXmlInstallments(db,'no-payment','company','entrada',noPayment);
+assert.equal(db.prepare("SELECT status FROM invoice_installments WHERE id='legacy'").get().status,'cancelado');
+db.exec("UPDATE invoice_installments SET status='pago' WHERE id='legacy'");
+syncXmlInstallments(db,'no-payment','company','entrada',noPayment);
+assert.equal(db.prepare("SELECT status FROM invoice_installments WHERE id='legacy'").get().status,'pago');
+db.close();console.log('PASS: real XML installments, no inferred date, repeat-safe ingestion, preserved paid history and explicit no-payment legacy correction.');

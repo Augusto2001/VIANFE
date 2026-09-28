@@ -38,7 +38,10 @@ function pfxToPem(buf, pass) {
   let keyPem = '', certPem = '';
   for (const sc of p12.safeContents) for (const b of sc.safeBags) {
     if ((b.type === forge.pki.oids.pkcs8ShroudedKeyBag || b.type === forge.pki.oids.keyBag) && b.key) keyPem = forge.pki.privateKeyToPem(b.key);
-    else if (b.type === forge.pki.oids.certBag && b.cert && !certPem) certPem = forge.pki.certificateToPem(b.cert);
+    else if (b.type === forge.pki.oids.certBag && b.cert && !certPem) {
+      if (b.cert.validity.notAfter < new Date() || b.cert.validity.notBefore > new Date()) throw new Error('Certificado fora da validade; renovar antes de consultar a SEFAZ');
+      certPem = forge.pki.certificateToPem(b.cert);
+    }
   }
   return { keyPem, certPem };
 }
@@ -168,6 +171,7 @@ for (const c of (retryOnly ? [] : companies)) {
       AND i.status NOT LIKE 'manifestado_%'
       AND (i.xml_raw IS NULL OR i.xml_raw LIKE '%resNFe%')
       AND NOT EXISTS (SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id = i.id AND m.event_code='210210' AND m.status='autorizado')
+      AND NOT EXISTS (SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id = i.id AND m.event_code='210210' AND m.sefaz_cstat IN ('596','655'))
     ORDER BY i.data_emissao DESC LIMIT ?`).all(c.id, MAX_PER_COMPANY);
 
   let okC = 0;
@@ -193,7 +197,10 @@ for (const c of (retryOnly ? [] : companies)) {
         db.prepare("UPDATE invoices SET status='manifestado_ciencia' WHERE id=? AND status NOT LIKE 'manifestado_%'").run(inv.id);
         db.exec('COMMIT'); T.aceita++; okC++;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
-    } catch (e) { T.err++; log(`ERRO ${inv.chave_acesso}: ${e.message}`); }
+    } catch (e) {
+      T.err++; log(`ERRO ${inv.chave_acesso}: ${e.message}`);
+      if (e.message === 'SEFAZ HTTP 403') { log('ACESSO certificado/serviço indisponível',c.id); break; }
+    }
     await sleep(DELAY_MS);
   }
   if (targets.length) log(`OK ${c.razao_social.slice(0,42).padEnd(42)} alvo=${targets.length} aceita=${okC}`);
