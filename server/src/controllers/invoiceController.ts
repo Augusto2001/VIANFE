@@ -226,8 +226,9 @@ export const invoiceController = {
       if (xmlContent) {
         try {
           const parsed = parseFiscalXml(xmlContent);
-          pdfPath = path.join(PDFS_DIR, `DANFE_${invoice.chave_acesso}.pdf`);
-          await generateDanfePdf(parsed, pdfPath);
+          const generatedPath = path.join(PDFS_DIR, `DANFE_${invoice.chave_acesso}.pdf`);
+          await generateDanfePdf(parsed, generatedPath);
+          pdfPath = generatedPath;
           db.prepare('UPDATE invoices SET pdf_file_path = ? WHERE id = ?').run(pdfPath, invoice.id);
         } catch (genErr) {
           console.warn('Could not generate DANFE on the fly, falling back to existing PDF:', genErr);
@@ -381,8 +382,11 @@ export const invoiceController = {
       for (const file of files) {
         try {
           const xmlContent = fs.readFileSync(file.path, 'utf-8');
-          await sefazService.ingestXml(company_id, xmlContent, 'upload');
+          const imported = await sefazService.ingestXml(company_id, xmlContent, 'upload');
           processed++;
+          const stored = db.prepare('SELECT pdf_file_path FROM invoices WHERE id=?').get(imported.invoiceId) as any;
+          if (!stored?.pdf_file_path || !fs.existsSync(stored.pdf_file_path))
+            errors.push(`${file.originalname}: XML gravado; PDF/DANFSe ainda indisponível.`);
         } catch (itemErr: any) {
           errors.push(`${file.originalname}: ${itemErr.message}`);
         } finally {

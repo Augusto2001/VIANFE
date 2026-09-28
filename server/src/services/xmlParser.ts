@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import { cleanNumeric } from '../utils/crypto.js';
+import { parseNfseNacional } from './nfseNacionalParser.js';
 
 export interface ParsedFiscalItem {
   itemNumero: number;
@@ -85,6 +86,7 @@ export interface ParsedTransporte {
 }
 
 export interface ParsedFiscalInvoice {
+  nfseNacional?: boolean;
   chaveAcesso: string;
   numero: string;
   serie: string;
@@ -159,6 +161,7 @@ const parser = new XMLParser({
 export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
   try {
     const parsed = parser.parse(xmlContent);
+    if (parsed.NFSe?.infNFSe) return parseNfseNacional(parsed.NFSe);
 
     // 1. Check for resNFe (Resumo de NF-e da SEFAZ)
     if (parsed.resNFe) {

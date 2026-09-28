@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const {parseFiscalXml} = require('../dist/services/xmlParser.js');
+// Isolated fixture, never inserted into an operational database.
+const key='1'.repeat(50), description='Serviço detalhado '.repeat(30);
+const xml=`<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse"><infNFSe Id="NFS${key}"><nNFSe>7</nNFSe><cStat>100</cStat><dhProc>2026-08-13T14:46:25-03:00</dhProc><emit><CNPJ>11111111000111</CNPJ><xNome>Fixture</xNome><enderNac><UF>PR</UF></enderNac></emit><valores><vLiq>0.00</vLiq></valores><DPS><infDPS><tpAmb>1</tpAmb><dhEmi>2026-08-13T14:46:25-03:00</dhEmi><serie>70000</serie><prest><CNPJ>11111111000111</CNPJ></prest><serv><cServ><xDescServ>${description}</xDescServ></cServ></serv><valores><vServPrest><vServ>430.00</vServ></vServPrest></valores></infDPS></DPS></infNFSe></NFSe>`;
+const p=parseFiscalXml(xml);
+assert.equal(p.chaveAcesso,key);
+assert.equal(p.modelo,'NFS-e');
+assert.equal(p.totais.valorTotal,0);
+assert.equal(p.totais.valorProdutos,430);
+assert.equal(p.informacoesComplementares,description.trim());
+assert.equal(p.protocoloAutorizacao,undefined);
+assert.deepEqual(p.itens,[]);
+assert.deepEqual(p.duplicatas,[]);
+assert.deepEqual(p.pagamentos,[]);
+assert.equal(p.destinatario.uf,'');
+assert.throws(()=>parseFiscalXml(xml.replace('<cStat>100</cStat>','<cStat>999</cStat>')));
+assert.throws(()=>parseFiscalXml(xml.replace('<tpAmb>1</tpAmb>','<tpAmb>2</tpAmb>')));
+assert.throws(()=>parseFiscalXml(xml.replace('<vLiq>0.00</vLiq>','')));
+assert.throws(()=>parseFiscalXml(xml.replace(`Id="NFS${key}"`,'')));
+console.log('PASS: national NFSe real fields, zero net, full description, no fabricated protocol/payment/items; invalid documents rejected.');
+module.exports = { xml, key };
