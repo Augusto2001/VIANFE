@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db, XMLS_DIR, PDFS_DIR, STORAGE_DIR } from '../database/db.js';
 import { parseFiscalXml, ParsedFiscalInvoice } from './xmlParser.js';
 import { generateDanfePdf } from './danfeGenerator.js';
+import { syncXmlInstallments } from './invoiceInstallments.js';
 import { googleDriveService } from './googleDriveService.js';
 import { sefazDfeClient } from './sefazDfeClient.js';
 import { cleanNumeric } from '../utils/crypto.js';
@@ -254,59 +255,7 @@ export class SefazService {
     // MÓDULO FINANCEIRO: Sincronizar Duplicatas & Parcelas (Contas a Pagar / Receber)
     // =========================================================================
     try {
-      db.prepare('DELETE FROM invoice_installments WHERE invoice_id = ?').run(targetInvoiceId);
-
-      const installmentTipo = tipo === 'entrada' ? 'pagar' : 'receber';
-      const partyNome = tipo === 'entrada' ? parsed.emitente.razaoSocial : parsed.destinatario.razaoSocial;
-      const partyCnpj = tipo === 'entrada' ? parsed.emitente.cnpjCpf : parsed.destinatario.cnpjCpf;
-      const defaultForma = parsed.pagamentos?.[0]?.forma || 'Boleto / Duplicata';
-
-      if (parsed.duplicatas && parsed.duplicatas.length > 0) {
-        const insStmt = db.prepare(`
-          INSERT INTO invoice_installments (
-            id, invoice_id, company_id, tipo, numero_fatura, numero_parcela,
-            data_vencimento, valor, status, forma_pagamento, fornecedor_cliente_nome,
-            fornecedor_cliente_cnpj, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?, ?)
-        `);
-
-        for (const dup of parsed.duplicatas) {
-          insStmt.run(
-            uuidv4(),
-            targetInvoiceId,
-            actualCompanyId,
-            installmentTipo,
-            parsed.fatura?.numero || parsed.numero,
-            dup.numero,
-            dup.vencimento || parsed.dataEmissao,
-            dup.valor,
-            defaultForma,
-            partyNome,
-            partyCnpj,
-            now
-          );
-        }
-      } else if (parsed.totais.valorTotal > 0) {
-        db.prepare(`
-          INSERT INTO invoice_installments (
-            id, invoice_id, company_id, tipo, numero_fatura, numero_parcela,
-            data_vencimento, valor, status, forma_pagamento, fornecedor_cliente_nome,
-            fornecedor_cliente_cnpj, created_at
-          ) VALUES (?, ?, ?, ?, ?, '001', ?, ?, 'pendente', ?, ?, ?, ?)
-        `).run(
-          uuidv4(),
-          targetInvoiceId,
-          actualCompanyId,
-          installmentTipo,
-          parsed.fatura?.numero || parsed.numero,
-          parsed.dataSaidaEntrada || parsed.dataEmissao,
-          parsed.totais.valorTotal,
-          defaultForma,
-          partyNome,
-          partyCnpj,
-          now
-        );
-      }
+      syncXmlInstallments(db, targetInvoiceId, actualCompanyId, tipo, parsed);
     } catch (finErr: any) {
       console.warn(`Aviso ao alimentar módulo financeiro para nota ${parsed.numero}:`, finErr.message);
     }

@@ -9,6 +9,7 @@ import fs from 'fs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { parseFiscalXml } = require('../dist/services/xmlParser.js');
+const { syncXmlInstallments } = require('../dist/services/invoiceInstallments.js');
 import path from 'path';
 import https from 'https';
 import zlib from 'zlib';
@@ -83,8 +84,11 @@ export async function sendCiencia(company, chave, keyPem, certPem, transport = h
   const idEvento = `ID210210${chave}01`;
   const evento = `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><infEvento Id="${idEvento}"><cOrgao>91</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chave}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>210210</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Ciencia da Operacao</descEvento></detEvento></infEvento></evento>`;
 
-  const unsignedEnv = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now()}</idLote>${evento}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
-  const env = signEvent(unsignedEnv, idEvento, keyPem, certPem);
+  // Sign the fiscal event without transport namespaces. The receiver extracts it
+  // from SOAP before validating inclusive C14N; signing the envelope includes
+  // soap12's inherited namespace in the digest and causes rejection 297.
+  const signedEvent = signEvent(evento, idEvento, keyPem, certPem);
+  const env = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now()}</idLote>${signedEvent}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
   const host = tpAmb === '2' ? 'hom1.nfe.fazenda.gov.br' : 'www.nfe.fazenda.gov.br';
   const xml = await transport(host, '/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx', 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEventoNF', env, certPem, keyPem);
   return parseScienceResponse(xml, chave, tpAmb);
@@ -217,9 +221,23 @@ for (const c of companies) {
       if(f.full){
         const p=parseFiscalXml(f.full);
         if(p.chaveAcesso!==inv.chave_acesso || p.naturezaOperacao.startsWith('Resumo ') || !/^\d{15}$/.test(p.protocoloAutorizacao || '')) throw Error('XML retornado nao corresponde a nota completa solicitada');
+        db.exec('BEGIN IMMEDIATE');
+        try {
         db.prepare(`UPDATE invoices SET xml_raw=?, natureza_operacao=?, itens_json=?, duplicatas_json=?, pagamentos_json=?, fatura_json=?, valor_produtos=?, valor_icms=?, valor_pis=?, valor_cofins=?, valor_ipi=?, gdrive_synced=0 WHERE id=?`)
           .run(f.full,p.naturezaOperacao,JSON.stringify(p.itens),JSON.stringify(p.duplicatas),JSON.stringify(p.pagamentos),JSON.stringify(p.fatura||null),p.totais.valorProdutos,p.totais.valorIcms,p.totais.valorPis,p.totais.valorCofins,p.totais.valorIpi,inv.id);
+        syncXmlInstallments(db,inv.id,c.id,inv.tipo,p);
+        db.exec('COMMIT');
+        } catch(error) { db.exec('ROLLBACK'); throw error; }
         recovered++; log('RETRY XML completo',inv.id);
+        try {
+          const { XMLS_DIR } = require('../dist/database/db.js');
+          const { generateDanfePdf } = require('../dist/services/danfeGenerator.js');
+          const xmlPath=path.join(XMLS_DIR,`${inv.chave_acesso}.xml`);
+          fs.writeFileSync(xmlPath,f.full,'utf8');
+          const pdfPath=await generateDanfePdf(p);
+          db.prepare('UPDATE invoices SET xml_file_path=?,pdf_file_path=? WHERE id=?').run(xmlPath,pdfPath,inv.id);
+          log('RETRY XML e DANFE gravados',inv.id);
+        } catch(error) { pending++; log('RETRY arquivo/PDF pendente',inv.id,error.message); }
       } else {pending++;log('RETRY ainda pendente',inv.id);}
     }catch(e){pending++;log('RETRY erro',inv.id,e.message);}
     await sleep(Math.max(DELAY_MS,4000));

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const forge = require('node-forge');
 const {SignedXml} = require('xml-crypto');
-const {DOMParser} = require('@xmldom/xmldom');
+const {DOMParser,XMLSerializer} = require('@xmldom/xmldom');
 (async()=>{
   const {sendCiencia,parseScienceResponse}=await import('../scripts/auto_ciencia.mjs');
   const key='1'.repeat(44);
@@ -21,8 +21,10 @@ const {DOMParser} = require('@xmldom/xmldom');
     calls++; assert.equal(host,'www.nfe.fazenda.gov.br');assert.match(action,/nfeRecepcaoEventoNF$/);
     assert.match(body,/<tpEvento>210210<\/tpEvento>/);
     const doc=new DOMParser().parseFromString(body,'text/xml');
-    const verifier=new SignedXml({publicCert:pem});verifier.loadSignature(doc.getElementsByTagName('Signature')[0]);
-    assert.equal(verifier.checkSignature(body),true,'Verify the actual signed SOAP envelope');
+    const eventXml=new XMLSerializer().serializeToString(doc.getElementsByTagName('evento')[0]);
+    const eventDoc=new DOMParser().parseFromString(eventXml,'text/xml');
+    const verifier=new SignedXml({publicCert:pem});verifier.loadSignature(eventDoc.getElementsByTagName('Signature')[0]);
+    assert.equal(verifier.checkSignature(eventXml),true,'The extracted fiscal event must verify independently of SOAP namespaces');
     return response();
   });
   assert.equal(calls,1);assert.equal(result.nProt,'123456789012345');
