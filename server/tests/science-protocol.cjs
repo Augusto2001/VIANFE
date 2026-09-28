@@ -18,7 +18,7 @@ const {DOMParser} = require('@xmldom/xmldom');
   const pem=forge.pki.certificateToPem(cert),privatePem=forge.pki.privateKeyToPem(keys.privateKey);
   let calls=0;
   const result=await sendCiencia({cnpj:'12345678000199',uf:'SP'},key,privatePem,pem,async(host,pathname,action,body)=>{
-    calls++; assert.equal(host,'www1.nfe.fazenda.gov.br');assert.match(action,/nfeRecepcaoEventoNF$/);
+    calls++; assert.equal(host,'www.nfe.fazenda.gov.br');assert.match(action,/nfeRecepcaoEventoNF$/);
     assert.match(body,/<tpEvento>210210<\/tpEvento>/);
     const doc=new DOMParser().parseFromString(body,'text/xml');
     const verifier=new SignedXml({publicCert:pem});verifier.loadSignature(doc.getElementsByTagName('Signature')[0]);

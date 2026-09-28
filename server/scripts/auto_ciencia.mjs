@@ -85,7 +85,7 @@ export async function sendCiencia(company, chave, keyPem, certPem, transport = h
 
   const unsignedEnv = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now()}</idLote>${evento}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
   const env = signEvent(unsignedEnv, idEvento, keyPem, certPem);
-  const host = tpAmb === '2' ? 'hom1.nfe.fazenda.gov.br' : 'www1.nfe.fazenda.gov.br';
+  const host = tpAmb === '2' ? 'hom1.nfe.fazenda.gov.br' : 'www.nfe.fazenda.gov.br';
   const xml = await transport(host, '/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx', 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEventoNF', env, certPem, keyPem);
   return parseScienceResponse(xml, chave, tpAmb);
 }

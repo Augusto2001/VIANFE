@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const schedules = [];
 let launches = 0, finish;
+let companyReads = 0;
 const env = {};
 const stubs = {
   'node:child_process': {execFile: (_exe,args,_opts,cb) => {
@@ -12,7 +13,7 @@ const stubs = {
   }},
   'node:path':path,
   'node-cron':{schedule:(expression,callback,options)=>schedules.push({expression,callback,options})},
-  '../database/db.js':{db:{prepare:()=>({all:()=>[]})}},
+  '../database/db.js':{db:{prepare:()=>({all:()=>{companyReads++;return []}})}},
   '../services/sefazService.js':{sefazService:{}},
   '../services/googleDriveService.js':{googleDriveService:{}},
   '../services/predictiveAlertsService.js':{predictiveAlertsService:{}}
@@ -29,6 +30,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/jobs/scheduler.j
   const nightly=schedules.find(s=>s.expression==='30 2 * * *');
   nightly.callback();await Promise.resolve();assert.equal(launches,0);
   env.VIANFE_AUTO_CIENCIA_ENABLED='true';nightly.callback();assert.equal(launches,1);
+  assert.equal(companyReads,1,'Science must start before distribution can create a new cooldown');
   nightly.callback();assert.equal(launches,1,'Overlapping fiscal cycles must be skipped');
   finish(null,'','');await new Promise(resolve=>setImmediate(resolve));
   nightly.callback();assert.equal(launches,2);finish(null,'','');

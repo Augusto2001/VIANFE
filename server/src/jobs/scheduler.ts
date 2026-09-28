@@ -19,6 +19,16 @@ export function initScheduler() {
     console.log(`🤖 [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Iniciando varredura para empresas ativas...`);
 
     try {
+      // Process known summaries before a new distribution request starts its cooldown.
+      // The script itself still honors any existing SEFAZ cooldown.
+      if (triggerOrigin === 'MADRUGADA_02H30' && process.env.VIANFE_AUTO_CIENCIA_ENABLED === 'true') {
+        await new Promise<void>((resolve, reject) => execFile(process.execPath,
+          [path.resolve(__dirname, '../../scripts/auto_ciencia.mjs')],
+          { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+            if (stdout) console.log(stdout); if (stderr) console.warn(stderr);
+            if (err) reject(err); else resolve();
+          }));
+      }
       const activeCompanies = db.prepare(`
         SELECT id, razao_social, cnpj, cert_filename, last_nsu FROM companies WHERE status = 'ativo'
       `).all() as any[];
@@ -46,14 +56,6 @@ export function initScheduler() {
       }
 
       console.log(`🏁 [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Ciclo finalizado com sucesso. Total de notas capturadas no lote: ${totalSyncedNotes}`);
-      if (triggerOrigin === 'MADRUGADA_02H30' && process.env.VIANFE_AUTO_CIENCIA_ENABLED === 'true') {
-        await new Promise<void>((resolve, reject) => execFile(process.execPath,
-          [path.resolve(__dirname, '../../scripts/auto_ciencia.mjs')],
-          { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-            if (stdout) console.log(stdout); if (stderr) console.warn(stderr);
-            if (err) reject(err); else resolve();
-          }));
-      }
     } catch (err: any) {
       console.error(`❌ [ROBÔ SEFAZ 24/7 - ${triggerOrigin}] Erro crítico no ciclo:`, err.message);
     } finally { fiscalRunning = false; }
