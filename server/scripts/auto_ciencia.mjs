@@ -121,11 +121,18 @@ async function fetchFullXml(company, chave, keyPem, certPem) {
   const env = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe"><nfeDadosMsg><distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><tpAmb>${tpAmb}</tpAmb><cUFAutor>${cUf}</cUFAutor><CNPJ>${cnpj}</CNPJ><consChNFe><chNFe>${chave}</chNFe></consChNFe></distDFeInt></nfeDadosMsg></nfeDistDFeInteresse></soap12:Body></soap12:Envelope>`;
   const host = tpAmb === '2' ? 'hom1.nfe.fazenda.gov.br' : 'www1.nfe.fazenda.gov.br';
   const xml = await httpsSoap(host, '/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx', 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse', env, certPem, keyPem);
-  const cStat = (xml.match(/<cStat>(\d+)<\/cStat>/) || [])[1];
+  return parseDistributionResponse(xml);
+}
+export function parseDistributionResponse(xml) {
+  const result = findNode(parser.parse(xml), 'retDistDFeInt');
+  if (!result) throw new Error('Distribuição sem retDistDFeInt');
+  const cStat = String(result.cStat || '');
   if (cStat === '656') return { rate: true };
   if (cStat === '137') return { empty: true };
   // docZip base64+gzip
-  const docs = [...xml.matchAll(/<docZip[^>]*>([\s\S]*?)<\/docZip>/g)].map(m => m[1]);
+  if (cStat !== '138') throw new Error(`Distribuição ${cStat}: ${result.xMotivo || 'sem motivo'}`);
+  const entries = result.loteDistDFeInt?.docZip || [];
+  const docs = (Array.isArray(entries) ? entries : [entries]).map(d => typeof d === 'string' ? d : d['#text']);
   for (const b64 of docs) {
     try {
       const raw = zlib.gunzipSync(Buffer.from(b64, 'base64')).toString('utf8');
@@ -158,6 +165,7 @@ if (checkOnly) {
 }
 log(`INICIO ciência autônoma — ${companies.length} empresa(s)`);
 const T = { cand: 0, aceita: 0, xml: 0, rej: 0, err: 0, lock: [] };
+db.exec('CREATE TABLE IF NOT EXISTS nfe_xml_recovery_attempts(invoice_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL)');
 
 for (const c of (retryOnly ? [] : companies)) {
   if (c.sefaz_locked_until && new Date(c.sefaz_locked_until) > new Date()) { T.lock.push(c.razao_social); continue; }
@@ -171,7 +179,7 @@ for (const c of (retryOnly ? [] : companies)) {
       AND i.status NOT LIKE 'manifestado_%'
       AND (i.xml_raw IS NULL OR i.xml_raw LIKE '%resNFe%')
       AND NOT EXISTS (SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id = i.id AND m.event_code='210210' AND m.status='autorizado')
-      AND NOT EXISTS (SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id = i.id AND m.event_code='210210' AND m.sefaz_cstat IN ('596','655'))
+      AND NOT EXISTS (SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id = i.id AND m.event_code='210210' AND m.sefaz_cstat IN ('573','596','650','655'))
     ORDER BY i.data_emissao DESC LIMIT ?`).all(c.id, MAX_PER_COMPANY);
 
   let okC = 0;
@@ -214,12 +222,14 @@ for (const c of companies) {
   if (lock?.sefaz_locked_until && new Date(lock.sefaz_locked_until)>new Date()) continue;
   const targets=db.prepare(`SELECT i.* FROM invoices i WHERE i.company_id=?
     AND (i.xml_raw IS NULL OR i.xml_raw LIKE '%resNFe%')
-    AND EXISTS(SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id=i.id AND m.event_code='210210' AND m.status='autorizado')
-    ORDER BY i.data_emissao DESC LIMIT ?`).all(c.id,MAX_PER_COMPANY);
+    AND i.tipo='entrada' AND i.modelo='55'
+    AND NOT EXISTS(SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id=i.id AND m.sefaz_cstat='650')
+    ORDER BY COALESCE((SELECT attempted_at FROM nfe_xml_recovery_attempts a WHERE a.invoice_id=i.id),'') ASC, i.data_emissao DESC LIMIT ?`).all(c.id,MAX_PER_COMPANY);
   if(!targets.length) continue;
   let creds; try { creds=loadCert(c); } catch { log('RETRY certificado indisponivel',c.id); continue; }
   for(const inv of targets){
     try {
+      db.prepare('INSERT INTO nfe_xml_recovery_attempts(invoice_id,attempted_at) VALUES (?,?) ON CONFLICT(invoice_id) DO UPDATE SET attempted_at=excluded.attempted_at').run(inv.id,new Date().toISOString());
       const f=await fetchFullXml(c,inv.chave_acesso,creds.keyPem,creds.certPem);
       if(f.rate || f.empty){
         db.prepare('UPDATE companies SET sefaz_locked_until=? WHERE id=?').run(new Date(Date.now()+65*60*1000).toISOString(),c.id);

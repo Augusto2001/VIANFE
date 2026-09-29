@@ -195,6 +195,9 @@ export const invoiceController = {
         return res.status(404).json({ success: false, message: 'Arquivo XML não localizado no servidor.' });
       }
 
+      if (/<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(xmlContent)) {
+        return res.status(409).json({ success: false, message: 'XML completo pendente de recuperação. Resumo não é arquivo fiscal completo.' });
+      }
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${invoice.chave_acesso}.xml"`);
       return res.send(xmlContent);
@@ -220,6 +223,9 @@ export const invoiceController = {
         xmlContent = fs.readFileSync(invoice.xml_file_path, 'utf-8');
       }
 
+      if (!xmlContent || /<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(xmlContent)) {
+        return res.status(409).json({ success: false, message: 'DANFE indisponível: é necessário recuperar o XML completo.' });
+      }
       let pdfPath = invoice.pdf_file_path;
 
       // Always generate/refresh DANFE to official National Standard layout
@@ -322,6 +328,11 @@ export const invoiceController = {
         return res.status(400).json({ success: false, message: 'Nenhuma nota localizada no período/filtros selecionados para download.' });
       }
 
+      const incomplete = invoices.filter((inv: any) => {
+        const xml = inv.xml_raw || (inv.xml_file_path && fs.existsSync(inv.xml_file_path) ? fs.readFileSync(inv.xml_file_path, 'utf8') : '');
+        return !xml || /<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(xml);
+      });
+      if (incomplete.length) return res.status(409).json({ success: false, message: `${incomplete.length} nota(s) aguardam XML completo. O pacote não foi gerado para evitar entrega incompleta.`, pending: incomplete.map((inv: any) => ({ id: inv.id, numero: inv.numero })) });
       const archive = archiver('zip', { zlib: { level: 9 } });
       const cleanName = company.razao_social.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 30);
       const zipFileName = `Notas_${type.toUpperCase()}_${cleanName}_${Date.now()}.zip`;

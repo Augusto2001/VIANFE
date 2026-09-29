@@ -6,7 +6,8 @@ import { formatCNPJ, formatChaveAcesso, cleanNumeric } from '../utils/crypto.js'
 import { PDFS_DIR } from '../database/db.js';
 
 export async function generateDanfePdf(invoice: ParsedFiscalInvoice, outputPath?: string): Promise<string> {
-  if (invoice.nfseNacional) throw new Error('NFS-e Nacional: anexar o DANFSe oficial correspondente; não gerar DANFE de mercadorias.');
+  if (invoice.naturezaOperacao.startsWith('Resumo ')) throw new Error('XML completo pendente: resumo não permite gerar DANFE.');
+  if (invoice.nfseNacional || invoice.nfseMunicipal) throw new Error('NFS-e: anexar o DANFSe oficial correspondente; não gerar DANFE de mercadorias.');
   const filePath = outputPath || path.join(PDFS_DIR, `DANFE_${invoice.chaveAcesso}.pdf`);
 
   return new Promise((resolve, reject) => {

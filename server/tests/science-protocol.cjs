@@ -3,7 +3,12 @@ const forge = require('node-forge');
 const {SignedXml} = require('xml-crypto');
 const {DOMParser,XMLSerializer} = require('@xmldom/xmldom');
 (async()=>{
-  const {sendCiencia,parseScienceResponse}=await import('../scripts/auto_ciencia.mjs');
+  const {sendCiencia,parseScienceResponse,parseDistributionResponse}=await import('../scripts/auto_ciencia.mjs');
+  const zipped=require('node:zlib').gzipSync('<nfeProc><NFe/></nfeProc>').toString('base64');
+  assert.equal(parseDistributionResponse(`<s:Envelope><s:retDistDFeInt><s:cStat>138</s:cStat><s:loteDistDFeInt><s:docZip NSU="1">${zipped}</s:docZip></s:loteDistDFeInt></s:retDistDFeInt></s:Envelope>`).full,'<nfeProc><NFe/></nfeProc>');
+  assert.equal(parseDistributionResponse('<retDistDFeInt><cStat>137</cStat></retDistDFeInt>').empty,true);
+  assert.equal(parseDistributionResponse('<retDistDFeInt><cStat>656</cStat></retDistDFeInt>').rate,true);
+  assert.throws(()=>parseDistributionResponse('<retDistDFeInt><cStat>999</cStat></retDistDFeInt>'),/999/);
   const key='1'.repeat(44);
   const response=(code='135',protocol='123456789012345',chave=key,event='210210',amb='1',seq='1')=>
     `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><n:retEnvEvento xmlns:n="http://www.portalfiscal.inf.br/nfe"><n:cStat>128</n:cStat><n:retEvento><n:infEvento><n:cStat>${code}</n:cStat><n:nProt>${protocol}</n:nProt><n:chNFe>${chave}</n:chNFe><n:tpEvento>${event}</n:tpEvento><n:tpAmb>${amb}</n:tpAmb><n:nSeqEvento>${seq}</n:nSeqEvento></n:infEvento></n:retEvento></n:retEnvEvento></s:Body></s:Envelope>`;

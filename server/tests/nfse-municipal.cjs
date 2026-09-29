@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const {parseFiscalXml,parseFiscalXmlCollection}=require('../dist/services/xmlParser.js');
+const note=n=>`<CompNfse><Nfse><InfNfse><Numero>${n}</Numero><CodigoVerificacao>ABC${n}</CodigoVerificacao><DataEmissao>2026-08-01T10:00:00</DataEmissao><ValoresNfse><ValorLiquidoNfse>0</ValorLiquidoNfse></ValoresNfse><PrestadorServico><IdentificacaoPrestador><CpfCnpj><Cnpj>11111111000111</Cnpj></CpfCnpj></IdentificacaoPrestador><RazaoSocial>Fixture</RazaoSocial></PrestadorServico><DeclaracaoPrestacaoServico><InfDeclaracaoPrestacaoServico><Servico><Valores><ValorServicos>430</ValorServicos></Valores><Discriminacao>Descrição completa do serviço</Discriminacao></Servico><TomadorServico><IdentificacaoTomador><CpfCnpj><Cnpj>22222222000122</Cnpj></CpfCnpj></IdentificacaoTomador><RazaoSocial>Fixture tomador</RazaoSocial></TomadorServico></InfDeclaracaoPrestacaoServico></DeclaracaoPrestacaoServico></InfNfse></Nfse></CompNfse>`;
+const wrap=body=>`<GerarNfseResposta xmlns="http://www.abrasf.org.br/nfse.xsd"><ListaNfse>${body}</ListaNfse></GerarNfseResposta>`;
+const p=parseFiscalXml(wrap(note(68)));
+assert.equal(p.numero,'68');assert.equal(p.totais.valorProdutos,430);assert.equal(p.totais.valorTotal,0);
+assert.equal(p.destinatario.cnpjCpf,'22222222000122');assert.equal(p.destinatario.uf,'');
+assert.deepEqual(p.itens,[]);assert.deepEqual(p.duplicatas,[]);
+const batch=wrap(note(68)+note(72));
+assert.throws(()=>parseFiscalXml(batch),/2 NFS-e/);
+assert.deepEqual(parseFiscalXmlCollection(batch).map(p=>p.numero),['68','72']);
+assert.throws(()=>parseFiscalXml(wrap(note(68)).replace('<DataEmissao>2026-08-01T10:00:00</DataEmissao>','')),/data/);
+console.log('PASS: municipal wrapper, all notes audited, single import rejects multi-note XML, real gross/net/tomador, no invented dates or goods.');

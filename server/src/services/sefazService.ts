@@ -27,6 +27,10 @@ export class SefazService {
 
     // Parse the fiscal XML
     const parsed = parseFiscalXml(xmlString);
+    const previous = db.prepare('SELECT id,xml_raw FROM invoices WHERE chave_acesso=?').get(parsed.chaveAcesso) as any;
+    if (parsed.naturezaOperacao.startsWith('Resumo ') && previous?.xml_raw && !/<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(previous.xml_raw)) {
+      return { invoiceId: previous.id, chaveAcesso: parsed.chaveAcesso, action: 'updated' };
+    }
     const companyCnpjClean = cleanNumeric(company.cnpj);
     const emitenteCnpjClean = cleanNumeric(parsed.emitente.cnpjCpf);
     const destinatarioCnpjClean = cleanNumeric(parsed.destinatario.cnpjCpf);

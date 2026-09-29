@@ -87,6 +87,7 @@ export interface ParsedTransporte {
 
 export interface ParsedFiscalInvoice {
   nfseNacional?: boolean;
+  nfseMunicipal?: boolean;
   chaveAcesso: string;
   numero: string;
   serie: string;
@@ -158,10 +159,28 @@ const parser = new XMLParser({
   trimValues: true,
 });
 
+function municipalComponents(parsed: any): any[] | undefined {
+  const response = parsed.GerarNfseResposta || parsed.ConsultarNfseResposta || parsed.ConsultarLoteRpsResposta || parsed.EnviarLoteRpsResposta;
+  const comp = response?.ListaNfse?.CompNfse || parsed.CompNfse;
+  return comp ? (Array.isArray(comp) ? comp : [comp]) : undefined;
+}
+
+/** Read-only collection parsing for audits; ingestion of a single invoice never drops siblings. */
+export function parseFiscalXmlCollection(xmlContent: string): ParsedFiscalInvoice[] {
+  const parsed = parser.parse(xmlContent);
+  const components = municipalComponents(parsed);
+  return components ? components.map(comp => parseNfse({CompNfse: comp})) : [parseFiscalXml(xmlContent)];
+}
+
 export function parseFiscalXml(xmlContent: string): ParsedFiscalInvoice {
   try {
     const parsed = parser.parse(xmlContent);
     if (parsed.NFSe?.infNFSe) return parseNfseNacional(parsed.NFSe);
+    const components = municipalComponents(parsed);
+    if (components) {
+      if (components.length !== 1) throw new Error(`XML contém ${components.length} NFS-e; enviar XMLs individuais para não perder notas do lote.`);
+      return parseNfse({CompNfse: components[0]});
+    }
 
     // 1. Check for resNFe (Resumo de NF-e da SEFAZ)
     if (parsed.resNFe) {
@@ -628,11 +647,14 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
                    parsedObj;
   const infNfse = nfseRoot.InfNfse || nfseRoot;
   
-  const numero = String(infNfse.Numero || infNfse.IdentificacaoRps?.Numero || '0');
+  const numero = String(infNfse.Numero || '');
   const codigoVerificacao = String(infNfse.CodigoVerificacao || '');
-  const dataEmissao = infNfse.DataEmissao || new Date().toISOString();
+  const dataEmissao = infNfse.DataEmissao;
+  if (!numero || !codigoVerificacao || !dataEmissao) throw new Error('NFS-e municipal sem número, verificação ou data de emissão.');
   
-  const valores = infNfse.ValoresNfse || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.Valores || infNfse.Servico?.Valores || {};
+  const declaration = infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico || {};
+  const valores = {...(declaration.Servico?.Valores || infNfse.Servico?.Valores || {}), ...(infNfse.ValoresNfse || {})};
+  if (valores.ValorServicos == null) throw new Error('NFS-e municipal sem valor dos serviços.');
   const valorServicos = parseFloat(valores.ValorServicos || '0');
   const valorDeducoes = parseFloat(valores.ValorDeducoes || '0');
   const valorPis = parseFloat(valores.ValorPis || '0');
@@ -641,7 +663,8 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
   const valorIr = parseFloat(valores.ValorIr || '0');
   const valorCsll = parseFloat(valores.ValorCsll || '0');
   const valorIss = parseFloat(valores.ValorIss || '0');
-  const valorLiquido = parseFloat(valores.ValorLiquidoNfse || valores.ValorLiquido || valorServicos || '0');
+  const valorLiquido = parseFloat(valores.ValorLiquidoNfse ?? valores.ValorLiquido ?? String(valorServicos));
+  if (![valorServicos, valorLiquido].every(Number.isFinite)) throw new Error('Valores inválidos na NFS-e municipal.');
   
   const prestador = infNfse.PrestadorServico || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Prestador || infNfse.Prestador || infNfse.IdentificacaoPrestador || {};
   const prestadorCnpj = cleanNumeric(
@@ -655,11 +678,11 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
     prestador.Cpf ||
     ''
   );
-  const prestadorNome = String(prestador.RazaoSocial || prestador.NomeFantasia || prestador.xNome || 'Prestador de Serviços');
+  const prestadorNome = String(prestador.RazaoSocial || prestador.NomeFantasia || prestador.xNome || '');
   const prestadorEnder = prestador.Endereco || prestador.enderPrest || {};
-  const prestadorUf = String(prestadorEnder.Uf || prestadorEnder.UF || 'BA');
+  const prestadorUf = String(prestadorEnder.Uf || prestadorEnder.UF || '');
   
-  const tomador = infNfse.TomadorServico || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Tomador || infNfse.Tomador || infNfse.IdentificacaoTomador || {};
+  const tomador = infNfse.TomadorServico || declaration.TomadorServico || declaration.Tomador || infNfse.Tomador || infNfse.IdentificacaoTomador || {};
   const tomadorCnpj = cleanNumeric(
     tomador.IdentificacaoTomador?.CpfCnpj?.Cnpj ||
     tomador.IdentificacaoTomador?.CpfCnpj?.Cpf ||
@@ -671,12 +694,12 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
     tomador.Cpf ||
     ''
   );
-  const tomadorNome = String(tomador.RazaoSocial || tomador.NomeFantasia || tomador.xNome || 'Tomador de Serviços');
+  const tomadorNome = String(tomador.RazaoSocial || tomador.NomeFantasia || tomador.xNome || '');
   const tomadorEnder = tomador.Endereco || tomador.enderToma || {};
-  const tomadorUf = String(tomadorEnder.Uf || tomadorEnder.UF || 'BA');
+  const tomadorUf = String(tomadorEnder.Uf || tomadorEnder.UF || '');
 
-  const discriminacao = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.Discriminacao || infNfse.Servico?.Discriminacao || infNfse.Discriminacao || 'Prestação de Serviços');
-  const itemServico = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.ItemListaServico || infNfse.Servico?.ItemListaServico || '17.01');
+  const discriminacao = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.Discriminacao || infNfse.Servico?.Discriminacao || infNfse.Discriminacao || '');
+  const itemServico = String(infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico?.ItemListaServico || infNfse.Servico?.ItemListaServico || '');
 
   let chave = '';
   if (infNfse['@_Id']) {
@@ -686,35 +709,15 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
     chave = `NFSE${prestadorCnpj || '00000000000000'}${numero.padStart(15, '0')}`;
   }
 
-  const itens: ParsedFiscalItem[] = [
-    {
-      itemNumero: 1,
-      codigo: itemServico,
-      descricao: discriminacao.substring(0, 100),
-      ncm: '',
-      cfop: '',
-      unidade: 'UN',
-      quantidade: 1,
-      valorUnitario: valorServicos,
-      valorTotal: valorServicos,
-      icms: {
-        aliquota: 0,
-        valor: 0
-      },
-      pis: {
-        valor: valorPis
-      },
-      cofins: {
-        valor: valorCofins
-      }
-    }
-  ];
+  if (!prestadorCnpj) throw new Error('NFS-e municipal sem identificação do prestador.');
+  const itens: ParsedFiscalItem[] = [];
 
   return {
     chaveAcesso: chave,
     numero,
-    serie: String(infNfse.IdentificacaoRps?.Serie || '1'),
+    serie: String(infNfse.IdentificacaoRps?.Serie || declaration.Rps?.IdentificacaoRps?.Serie || ''),
     modelo: 'NFS-e',
+    nfseMunicipal: true,
     naturezaOperacao: 'Prestação de Serviços',
     tipoOperacao: '1',
     dataEmissao,
@@ -723,7 +726,7 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
       cnpjCpf: prestadorCnpj,
       razaoSocial: prestadorNome,
       uf: prestadorUf,
-      municipio: String(prestadorEnder.xMun || prestadorEnder.CodigoMunicipio || 'Salvador'),
+      municipio: String(prestadorEnder.xMun || prestadorEnder.CodigoMunicipio || ''),
       logradouro: String(prestadorEnder.Endereco || prestadorEnder.xLgr || ''),
       numero: String(prestadorEnder.Numero || prestadorEnder.nro || ''),
       bairro: String(prestadorEnder.Bairro || prestadorEnder.xBairro || ''),
@@ -745,7 +748,7 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
       valorSeguro: 0,
       valorDesconto: valorDeducoes,
       valorOutrasDespesas: 0,
-      valorTotal: valorLiquido || valorServicos,
+      valorTotal: valorLiquido,
       baseCalculoIcms: 0,
       valorIcms: 0,
       baseCalculoIcmsSt: 0,
