@@ -27,7 +27,7 @@ export class SefazService {
 
     // Parse the fiscal XML
     const parsed = parseFiscalXml(xmlString);
-    const previous = db.prepare('SELECT id,xml_raw FROM invoices WHERE chave_acesso=?').get(parsed.chaveAcesso) as any;
+    const previous = db.prepare('SELECT id,xml_raw,status FROM invoices WHERE chave_acesso=?').get(parsed.chaveAcesso) as any;
     if (parsed.naturezaOperacao.startsWith('Resumo ') && previous?.xml_raw && !/<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(previous.xml_raw)) {
       return { invoiceId: previous.id, chaveAcesso: parsed.chaveAcesso, action: 'updated' };
     }
@@ -168,7 +168,7 @@ export class SefazService {
         parsed.serie,
         parsed.modelo,
         tipo,
-        parsed.status,
+        previous?.status?.startsWith('manifestado_') || previous?.status === 'cancelada' ? previous.status : parsed.status,
         parsed.naturezaOperacao,
         parsed.dataEmissao,
         parsed.dataSaidaEntrada || null,

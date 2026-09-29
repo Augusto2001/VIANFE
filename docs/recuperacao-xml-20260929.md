@@ -11,3 +11,5 @@ Validação adicional de NFS-e: 772 registros de arquivos candidatos, 38 naciona
 Carga anterior concluída: 33.892 novas NF-e/NFC-e, com comparação do XML persistido e existência/cabeçalho PDF. Oito XMLs nacionais de NFS-e importados (sete AG7 e um Preço Bom) continuam sem DANFSe oficial, cuja API retornou 503. Foram separados 83 cancelamentos indicados, sete documentos sem autorização confirmada e um XML inconsistente. Não declarar tudo completo nem substituir XML original por dados fabricados.
 
 Testes: science-protocol.cjs, full-document-download.cjs, nfse-municipal.cjs e testes fiscais existentes. Execução operacional posterior deve registrar recuperados e pendências reais; o deploy sozinho não comprova recuperação.
+
+Complemento: recuperação por XML original usa recover_summary_manifest.mjs, valida chave/protocolo/destinatário e preserva manifestações e cancelamentos. Consultas por chave têm orçamento conservador de dez tentativas por empresa em 65 minutos. A rotina não remove carências impostas pela SEFAZ.

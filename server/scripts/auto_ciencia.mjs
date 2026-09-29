@@ -220,11 +220,14 @@ let recovered=0, pending=0;
 for (const c of companies) {
   const lock=db.prepare('SELECT sefaz_locked_until FROM companies WHERE id=?').get(c.id);
   if (lock?.sefaz_locked_until && new Date(lock.sefaz_locked_until)>new Date()) continue;
+  const recent=db.prepare(`SELECT count(*) n FROM nfe_xml_recovery_attempts a JOIN invoices i ON i.id=a.invoice_id WHERE i.company_id=? AND a.attempted_at>?`).get(c.id,new Date(Date.now()-65*60*1000).toISOString()).n;
+  const budget=Math.max(0,10-Number(recent));
+  if(!budget){log('RETRY orçamento de consultas esgotado',c.id);continue;}
   const targets=db.prepare(`SELECT i.* FROM invoices i WHERE i.company_id=?
     AND (i.xml_raw IS NULL OR i.xml_raw LIKE '%resNFe%')
     AND i.tipo='entrada' AND i.modelo='55'
     AND NOT EXISTS(SELECT 1 FROM nfe_manifestations m WHERE m.invoice_id=i.id AND m.sefaz_cstat='650')
-    ORDER BY COALESCE((SELECT attempted_at FROM nfe_xml_recovery_attempts a WHERE a.invoice_id=i.id),'') ASC, i.data_emissao DESC LIMIT ?`).all(c.id,MAX_PER_COMPANY);
+    ORDER BY COALESCE((SELECT attempted_at FROM nfe_xml_recovery_attempts a WHERE a.invoice_id=i.id),'') ASC, i.data_emissao DESC LIMIT ?`).all(c.id,Math.min(MAX_PER_COMPANY,budget));
   if(!targets.length) continue;
   let creds; try { creds=loadCert(c); } catch { log('RETRY certificado indisponivel',c.id); continue; }
   for(const inv of targets){
