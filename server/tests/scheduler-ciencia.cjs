@@ -25,7 +25,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/jobs/scheduler.j
 });
 (async()=>{
   exportsObject.initScheduler();
-  assert.equal(schedules.length,4);
+  assert.equal(schedules.length, 6);
   for(const item of schedules)assert.equal(item.options.timezone,'America/Sao_Paulo');
   const nightly=schedules.find(s=>s.expression==='30 2 * * *');
   nightly.callback();await Promise.resolve();assert.equal(launches,0);

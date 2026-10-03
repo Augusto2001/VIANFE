@@ -161,12 +161,12 @@ export function initScheduler() {
   // 4. Robô Mensal de NFS-e (1º dia do mês às 06:00 BRT - Horário de Brasília)
   cron.schedule('0 6 1 * *', () => {
     runNfseMonthlyBatchSync('DIA_01_06H00');
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   // 5. Repescagem Mensal de NFS-e (3º dia do mês às 06:00 BRT - Horário de Brasília)
   cron.schedule('0 6 3 * *', () => {
     runNfseMonthlyBatchSync('REPESCAGEM_DIA_03_06H00');
-  });
+  }, { timezone: 'America/Sao_Paulo' });
 
   console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna e Mensal:');
   console.log('  └─ Varredura Madrugada 1: Diariamente às 01:15 AM (Brasília)');
