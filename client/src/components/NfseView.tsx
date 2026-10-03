@@ -26,7 +26,8 @@ import {
   Share2,
   Bot,
   Zap,
-  Cloud
+  Cloud,
+  Store
 } from 'lucide-react';
 
 interface NfseViewProps {
@@ -34,8 +35,8 @@ interface NfseViewProps {
 }
 
 const PREFEITURAS = [
-  'Salvador (Robô Automatizado)',
   'Salvador (Webservice Direto)',
+  'Salvador (Robô Automatizado)',
   'Salvador (Focus NFe)',
   'Feira de Santana',
   'Lauro de Freitas',
@@ -45,6 +46,10 @@ const PREFEITURAS = [
 ];
 
 export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
+  const isCommerceOnly = selectedCompany 
+    ? (selectedCompany.emite_nfse === 0 || selectedCompany.emite_nfse === false || (selectedCompany.emite_nfse as any) === '0') 
+    : false;
+
   const [activeSubTab, setActiveSubTab] = useState<'emitted' | 'recurring'>('emitted');
   const [nfseList, setNfseList] = useState<any[]>([]);
   const [recurringClients, setRecurringClients] = useState<any[]>([]);
@@ -53,7 +58,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const [showClientModal, setShowClientModal] = useState(false);
 
   // Focus NFe & Mode State
-  const [emissionMode, setEmissionMode] = useState<'robo_salvador' | 'webservice_direto' | 'focus_nfe'>('robo_salvador');
+  const [emissionMode, setEmissionMode] = useState<'robo_salvador' | 'webservice_direto' | 'focus_nfe'>('webservice_direto');
   const [focusToken, setFocusToken] = useState('');
   const [focusAmbiente, setFocusAmbiente] = useState<'producao' | 'homologacao'>('producao');
   const [nfseProvedor, setNfseProvedor] = useState('robo_salvador');
@@ -61,7 +66,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const [showFocusConfig, setShowFocusConfig] = useState(false);
 
   // Form State for NFS-e Emission
-  const [prefeitura, setPrefeitura] = useState('Salvador (Robô Automatizado)');
+  const [prefeitura, setPrefeitura] = useState('Salvador (Webservice Direto)');
   const [numeroRps, setNumeroRps] = useState('1');
   const [serieRps, setSerieRps] = useState('1');
   const [tomadorCnpj, setTomadorCnpj] = useState('');
@@ -141,6 +146,10 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
     setNfseList([]);
     setRecurringClients([]);
     if (selectedCompany) {
+      if (selectedCompany.cert_filename) {
+        setEmissionMode('webservice_direto');
+        setPrefeitura('Salvador (Webservice Direto)');
+      }
       loadData();
     }
   }, [selectedCompany?.id]);
@@ -240,6 +249,10 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const handleEmitNfse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCompany) return;
+    if (isCommerceOnly) {
+      alert('Esta empresa é de comércio puro e não emite NFS-e.');
+      return;
+    }
     setError('');
 
     if (!tomadorCnpj || !tomadorNome || !valorServicos || !discriminacaoServico) {
@@ -389,22 +402,31 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => setShowClientModal(true)}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
-            >
-              <UserPlus className="w-4 h-4 text-cyan-400" />
-              <span>Cadastrar Tomador</span>
-            </button>
+            {isCommerceOnly ? (
+              <div className="px-3.5 py-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs font-bold flex items-center gap-2 shadow-sm">
+                <Store className="w-4 h-4 text-amber-400" />
+                <span>Comércio Puro (Não Emissora de NFS-e)</span>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowClientModal(true)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <UserPlus className="w-4 h-4 text-cyan-400" />
+                  <span>Cadastrar Tomador</span>
+                </button>
 
-            {/* Direct Fiscal Actions */}
-            <button
-              onClick={() => setShowModal(true)}
-              className="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Emitir Nova NFS-e</span>
-            </button>
+                {/* Direct Fiscal Actions */}
+                <button
+                  onClick={() => setShowModal(true)}
+                  className="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Emitir Nova NFS-e</span>
+                </button>
+              </>
+            )}
 
             {/* Focus NFe Integration Button */}
             <button
@@ -520,35 +542,55 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
         )}
 
         {/* Subtabs: Emitted vs Tomadores */}
-        <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800/80">
-          <button
-            onClick={() => setActiveSubTab('emitted')}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSubTab === 'emitted'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Notas Emitidas ({nfseList.length})</span>
-          </button>
+        {!isCommerceOnly && (
+          <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800/80">
+            <button
+              onClick={() => setActiveSubTab('emitted')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSubTab === 'emitted'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Notas Emitidas ({nfseList.length})</span>
+            </button>
 
-          <button
-            onClick={() => setActiveSubTab('recurring')}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSubTab === 'recurring'
-                ? 'bg-cyan-600 text-white shadow-md'
-                : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5 text-cyan-300" />
-            <span>Tomadores Cadastrados ({recurringClients.length})</span>
-          </button>
-        </div>
+            <button
+              onClick={() => setActiveSubTab('recurring')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSubTab === 'recurring'
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-cyan-300" />
+              <span>Tomadores Cadastrados ({recurringClients.length})</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* SubTab 1: Emitted List */}
-      {activeSubTab === 'emitted' && (
+      {isCommerceOnly ? (
+        <div className="p-8 text-center bg-slate-900/80 border border-amber-500/30 rounded-2xl shadow-xl space-y-4 animate-fade-in">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+            <Store className="w-7 h-7 text-amber-400" />
+          </div>
+          <div className="max-w-xl mx-auto space-y-2">
+            <h3 className="text-lg font-black text-white">Empresa de Comércio Puro</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              A empresa <strong className="text-white font-semibold">{selectedCompany.razao_social}</strong> está cadastrada como Comércio Puro no sistema.
+              Empresas exclusivamente comerciais realizam venda de mercadorias (NF-e Modelo 55 ou NFC-e Modelo 65) e não emitem Notas Fiscais de Serviços Eletrônicas municipais.
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-slate-400">
+            <span>Para emitir e consultar notas fiscais de mercadorias, utilize o menu <strong>Notas & SEFAZ</strong> ou o <strong>Portal do Cliente</strong>.</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* SubTab 1: Emitted List */}
+          {activeSubTab === 'emitted' && (
         <div className="space-y-3">
           {nfseList.length === 0 ? (
             <div className="p-12 text-center bg-slate-900/50 border border-slate-800 rounded-2xl space-y-3">
@@ -717,11 +759,13 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
           )}
         </div>
       )}
+      </>
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL: EMIT NEW NFS-E */}
       {/* ========================================================================= */}
-      {showModal && (
+      {!isCommerceOnly && showModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-xl rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-scale-up">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1014,7 +1058,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
       {/* ========================================================================= */}
       {/* MODAL: CADASTRO DE TOMADOR (COM BUSCA AUTOMÁTICA DE CNPJ) */}
       {/* ========================================================================= */}
-      {showClientModal && (
+      {!isCommerceOnly && showClientModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-scale-up">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">

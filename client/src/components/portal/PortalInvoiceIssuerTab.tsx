@@ -62,7 +62,8 @@ export const PortalInvoiceIssuerTab: React.FC<PortalInvoiceIssuerTabProps> = ({ 
   const [searchingCnpj, setSearchingCnpj] = useState(false);
 
   // Step 2: Item / Serviço
-  const [tipoNota, setTipoNota] = useState<'NFS-e' | 'NF-e'>('NFS-e');
+  const isCommerceOnly = company.emite_nfse === 0 || company.emite_nfse === false || (company.emite_nfse as any) === '0';
+  const [tipoNota, setTipoNota] = useState<'NFS-e' | 'NF-e'>(isCommerceOnly ? 'NF-e' : 'NFS-e');
   const [descricao, setDescricao] = useState('');
   const [valorUnitario, setValorUnitario] = useState('');
   const [aliquotaIss, setAliquotaIss] = useState(String(company.nfse_aliquota_padrao || '5.0'));
@@ -106,8 +107,11 @@ export const PortalInvoiceIssuerTab: React.FC<PortalInvoiceIssuerTabProps> = ({ 
   };
 
   useEffect(() => {
+    if (isCommerceOnly) {
+      setTipoNota('NF-e');
+    }
     loadCatalogs();
-  }, [company.id]);
+  }, [company.id, isCommerceOnly]);
 
   // Mask formatting
   const formatCnpjCpfInput = (val: string) => {
@@ -756,15 +760,19 @@ export const PortalInvoiceIssuerTab: React.FC<PortalInvoiceIssuerTabProps> = ({ 
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setTipoNota('NFS-e')}
+                    disabled={isCommerceOnly}
+                    onClick={() => !isCommerceOnly && setTipoNota('NFS-e')}
                     className={`py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 border transition-all ${
-                      tipoNota === 'NFS-e'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md'
-                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                      isCommerceOnly
+                        ? 'opacity-40 cursor-not-allowed bg-slate-950/40 text-slate-500 border-slate-900'
+                        : tipoNota === 'NFS-e'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md cursor-pointer'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white cursor-pointer'
                     }`}
+                    title={isCommerceOnly ? 'Empresa de Comércio Puro (não emite NFS-e)' : 'Nota Fiscal de Serviços'}
                   >
                     <Wrench className="w-4 h-4" />
-                    <span>NFS-e (Prestação de Serviços)</span>
+                    <span>{isCommerceOnly ? 'NFS-e (Bloqueado - Comércio Puro)' : 'NFS-e (Prestação de Serviços)'}</span>
                   </button>
 
                   <button

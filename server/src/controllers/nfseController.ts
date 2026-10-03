@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Request, Response } from 'express';
 import { db } from '../database/db.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -6,6 +8,7 @@ import { salvadorNfseService } from '../services/salvadorNfseService.js';
 import { salvadorRobotService } from '../services/salvadorRobotService.js';
 import { NfseAdapterFactory } from '../services/nfse/NfseAdapterFactory.js';
 import { decryptText } from '../utils/crypto.js';
+import { nfsePdfGenerator } from '../services/nfsePdfGenerator.js';
 
 // List of supported prefeituras
 export const SUPPORTED_PREFEITURAS = [
@@ -67,6 +70,14 @@ export const nfseController = {
         return;
       }
 
+      // 🛡️ Bloqueio para Empresas de Comércio Puro (não emissoras de NFS-e)
+      if (company.emite_nfse === 0 || company.emite_nfse === false || company.emite_nfse === '0') {
+        res.status(400).json({
+          error: `A empresa "${company.razao_social}" está cadastrada como Comércio Puro (não emissora de NFS-e). Emissão bloqueada.`
+        });
+        return;
+      }
+
       // Sequential RPS Tracking
       const currentLastRps = Number(company.ultimo_rps_numero || 0);
       const nextRpsNum = numero_rps ? Number(numero_rps) : (currentLastRps + 1);
@@ -82,12 +93,27 @@ export const nfseController = {
       let statusNfse = 'emitida';
       let successMessage = `NFS-e emitida com sucesso (RPS Nº ${nextRpsNum} - Série ${chosenSerieRps})!`;
       let pdfUrlReturned: string | undefined = undefined;
+      let adapterResultXml: string | undefined = undefined;
 
       // 🏛️ Multi-City Transmission Architecture (Robô Salvador, Webservice Direto A1 ou Focus NFe)
       try {
         const incomingFocusToken = req.body.focus_nfe_token ? String(req.body.focus_nfe_token).trim() : '';
         const effectiveToken = incomingFocusToken || company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN || '';
-        const provedorSolicitado = req.body.provedor || company.nfse_provedor || (effectiveToken ? 'focus_nfe' : 'robo_salvador');
+        let provedorSolicitado = req.body.provedor || company.nfse_provedor;
+
+        let passDecrypted = company.nfse_senha_prefeitura || req.body.senha_prefeitura || '';
+        try {
+          if (passDecrypted) passDecrypted = decryptText(passDecrypted);
+        } catch (_) {}
+
+        // Fallback inteligente: se robo_salvador foi solicitado mas não há senha e existe certificado A1, usa webservice_direto
+        if ((!provedorSolicitado || provedorSolicitado === 'robo_salvador' || provedorSolicitado === 'robo') && !passDecrypted && company.cert_filename) {
+          console.log(`ℹ️ [Emissão NFS-e] Senha da prefeitura não cadastrada. Redirecionando automaticamente para Webservice Direto com Certificado A1.`);
+          provedorSolicitado = 'webservice_direto';
+        }
+        if (!provedorSolicitado) {
+          provedorSolicitado = effectiveToken ? 'focus_nfe' : (company.cert_filename ? 'webservice_direto' : 'robo_salvador');
+        }
 
         if (incomingFocusToken && incomingFocusToken !== company.focus_nfe_token) {
           try {
@@ -98,11 +124,6 @@ export const nfseController = {
 
         if (provedorSolicitado === 'robo_salvador' || (prefeitura === 'Salvador' && provedorSolicitado === 'robo')) {
           console.log(`🤖 [Emissão NFS-e] Acionando Robô Automatizado Nota Salvador para RPS Nº ${nextRpsNum}...`);
-          let passDecrypted = company.nfse_senha_prefeitura || req.body.senha_prefeitura || '';
-          try {
-            if (passDecrypted) passDecrypted = decryptText(passDecrypted);
-          } catch (_) {}
-
           if (!passDecrypted) {
             throw new Error('Senha da Prefeitura de Salvador não encontrada. Acesse o menu Empresas ou preencha a senha no cadastro.');
           }
@@ -237,6 +258,89 @@ export const nfseController = {
         nowIso
       );
 
+      // Salva o XML emitido e gera o DANFSe em PDF oficial
+      const now = new Date();
+      const anoStr = String(now.getFullYear());
+      const mesStr = `${String(now.getMonth() + 1).padStart(2, '0')}.${anoStr}`;
+      const exportDir = path.resolve(__dirname, `../../storage/exports/nfse/${company.cnpj}/${anoStr}/${mesStr}`);
+      if (!fs.existsSync(exportDir)) {
+        fs.mkdirSync(exportDir, { recursive: true });
+      }
+
+      const numPad8 = String(numeroNfse || nextRpsNum).padStart(8, '0');
+      const xmlPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.xml`);
+      const pdfPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.pdf`);
+
+      if (adapterResultXml) {
+        try { fs.writeFileSync(xmlPath, adapterResultXml, 'utf8'); } catch (_) {}
+      }
+
+      try {
+        await nfsePdfGenerator.generateDanfsePdf({
+          numero: String(numeroNfse || nextRpsNum),
+          codigoVerificacao,
+          dataEmissao: new Date().toLocaleString('pt-BR'),
+          prestadorNome: company.razao_social,
+          prestadorCnpj: company.cnpj,
+          prestadorCga: company.inscricao_municipal || (company.cnpj === '11156091000175' ? '0102932500147' : '72516200143'),
+          prestadorMunicipio: 'Salvador',
+          prestadorUf: company.uf || 'BA',
+          prestadorEmail: company.email,
+          tomadorNome: tomador_nome.trim(),
+          tomadorDoc: tomador_cnpj.replace(/\D/g, ''),
+          tomadorMunicipio: 'Salvador',
+          tomadorUf: 'BA',
+          valorServicos: Number(valor_servicos),
+          aliquota,
+          valorIss,
+          issRetido: !!iss_retido,
+          discriminacao: discriminacao_servico.trim(),
+          itemServico: item_servico || company.item_servico_padrao || '17.19',
+          cnae: company.cnae_padrao || '6920601',
+          isCancelada: false
+        }, pdfPath);
+      } catch (pdfErr) {
+        console.warn('Aviso geração DANFSe PDF pós-emissão:', pdfErr);
+      }
+
+      // Inserção na tabela invoices para visualização imediata no Dashboard
+      const chaveAcesso = `NFSE${company.cnpj}${numPad8}`;
+      const invId = uuidv4();
+      try {
+        db.prepare(`
+          INSERT OR REPLACE INTO invoices (
+            id, company_id, chave_acesso, numero, serie, modelo, tipo, status,
+            natureza_operacao, data_emissao, emitente_cnpj, emitente_nome, emitente_uf,
+            destinatario_cnpj, destinatario_nome, destinatario_uf, valor_total, valor_produtos,
+            xml_file_path, pdf_file_path, created_at
+          ) VALUES (
+            ?, ?, ?, ?, ?, 'NFS-e', '1', 'autorizada',
+            'Prestação de Serviços', ?, ?, ?, ?,
+            ?, ?, 'BA', ?, ?,
+            ?, ?, ?
+          )
+        `).run(
+          invId,
+          company.id,
+          chaveAcesso,
+          String(numeroNfse || nextRpsNum),
+          chosenSerieRps,
+          nowIso,
+          company.cnpj,
+          company.razao_social,
+          company.uf || 'BA',
+          tomador_cnpj.replace(/\D/g, ''),
+          tomador_nome.trim(),
+          Number(valor_servicos),
+          Number(valor_servicos),
+          fs.existsSync(xmlPath) ? xmlPath : null,
+          fs.existsSync(pdfPath) ? pdfPath : null,
+          nowIso
+        );
+      } catch (errInv: any) {
+        console.warn('Aviso inserção invoices:', errInv.message);
+      }
+
       res.status(201).json({
         message: successMessage,
         data: {
@@ -292,148 +396,40 @@ export const nfseController = {
           }
         } catch (_) {}
       }
+      if (nfse.pdf_url && fs.existsSync(nfse.pdf_url)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="DANFSE_${nfse.numero_nfse || nfse.numero_rps}.pdf"`);
+        fs.createReadStream(nfse.pdf_url).pipe(res);
+        return;
+      }
 
-      const doc = new PDFDocument({ size: 'A4', margin: 20 });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="DANFSE_${nfse.numero_nfse || nfse.numero_rps}.pdf"`);
-
-      doc.pipe(res);
-
-      const left = 20;
-      const width = 555;
-
-      // 1. CANHOTO OFICIAL DE RECEBIMENTO
-      doc.rect(left, 20, width, 45).stroke('#000000');
-      doc.fontSize(6).font('Helvetica').text('RECEBEMOS DE ' + (nfse.prestador_nome || 'VIACONT INOVACOES CONTABEIS LTDA').toUpperCase() + ' OS SERVIÇOS CONSTANTES NA NOTA FISCAL DE SERVIÇOS ELETRÔNICA INDICADA AO LADO.', left + 5, 25, { width: 420 });
-      doc.text('DATA DE RECEBIMENTO:', left + 5, 48);
-      doc.text('IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR:', left + 140, 48);
-      doc.moveTo(left + 290, 58).lineTo(left + 430, 58).stroke('#000000');
-
-      doc.moveTo(left + 440, 20).lineTo(left + 440, 65).stroke('#000000');
-      doc.fontSize(7).font('Helvetica-Bold').text('NFS-e', left + 450, 26, { align: 'center', width: 95 });
-      doc.fontSize(9).font('Helvetica-Bold').text(`Nº ${nfse.numero_nfse}`, left + 450, 36, { align: 'center', width: 95 });
-      doc.fontSize(6).font('Helvetica').text(`Série: ${nfse.serie_rps || '1'}`, left + 450, 50, { align: 'center', width: 95 });
-
-      // Linha tracejada de corte
-      doc.text('- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -', left, 70);
-
-      // 2. CABEÇALHO OFICIAL DA PREFEITURA DE SALVADOR / MUNICIPAL
-      doc.rect(left, 80, width, 75).stroke('#000000');
-      
-      // Brasão / Brasão Textual
-      doc.rect(left, 80, 80, 75).stroke('#000000');
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000').text('PREFEITURA', left + 5, 95, { align: 'center', width: 70 });
-      doc.fontSize(7).font('Helvetica-Bold').text('MUNICIPAL DE', left + 5, 107, { align: 'center', width: 70 });
-      doc.fontSize(8).font('Helvetica-Bold').text((nfse.prefeitura?.replace(/\(.*\)/, '') || 'SALVADOR').toUpperCase().trim(), left + 5, 119, { align: 'center', width: 70 });
-      doc.fontSize(6).font('Helvetica').text('SEFAZ MUNICIPAL', left + 5, 133, { align: 'center', width: 70 });
-
-      // Título Central
-      doc.fontSize(10).font('Helvetica-Bold').text('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - NFS-e', left + 90, 90, { width: 310, align: 'center' });
-      doc.fontSize(8).font('Helvetica-Bold').text('DANFSe - Documento Auxiliar da NFS-e', left + 90, 105, { width: 310, align: 'center' });
-      doc.fontSize(7).font('Helvetica').text(`RPS Nº ${nfse.numero_rps || '359'}  •  Série ${nfse.serie_rps || '1'}  •  Tipo: 1 - RPS`, left + 90, 120, { width: 310, align: 'center' });
-      doc.fontSize(6.5).font('Helvetica-Oblique').text(`Emitido nos termos da Lei Municipal e regulamentação da Secretaria da Fazenda`, left + 90, 134, { width: 310, align: 'center' });
-
-      // Dados da Nota & Autenticação (Lado Direito)
-      doc.moveTo(left + 410, 80).lineTo(left + 410, 155).stroke('#000000');
-      doc.fontSize(7).font('Helvetica').text('NÚMERO DA NOTA FISCAL', left + 415, 85);
-      doc.fontSize(10).font('Helvetica-Bold').text(`${nfse.numero_nfse}`, left + 415, 95);
-      
-      doc.fontSize(6.5).font('Helvetica').text('DATA/HORA EMISSÃO:', left + 415, 110);
-      doc.fontSize(7).font('Helvetica-Bold').text(`${new Date(nfse.issued_at || Date.now()).toLocaleString('pt-BR')}`, left + 415, 118);
-      
-      doc.fontSize(6.5).font('Helvetica').text('CÓDIGO DE VERIFICAÇÃO:', left + 415, 130);
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#047857').text(`${nfse.codigo_verificacao}`, left + 415, 138);
-      doc.fillColor('#000000');
-
-      // 3. PRESTADOR DE SERVIÇOS (EMISSOR)
-      doc.rect(left, 160, width, 65).stroke('#000000');
-      doc.rect(left, 160, width, 14).fill('#e2e8f0');
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000').text('PRESTADOR DE SERVIÇOS', left + 5, 164);
-      
-      doc.fontSize(9).font('Helvetica-Bold').text(nfse.prestador_nome || 'VIACONT INOVACOES CONTABEIS LTDA', left + 5, 178);
-      doc.fontSize(7.5).font('Helvetica').text(`CNPJ / CPF: ${nfse.prestador_cnpj || '11.156.091/0001-75'}`, left + 5, 192);
-      doc.text(`Inscrição Municipal (CGA): ${nfse.prestador_cga || '72516200143'}`, left + 200, 192);
-      doc.text(`Município: Salvador - BA (IBGE: 2927408)`, left + 390, 192);
-      
-      doc.text(`E-mail: ${nfse.prestador_email || 'contato@viacont.com.br'}`, left + 5, 206);
-      doc.text(`Optante pelo Simples Nacional: SIM  |  Incentivador Cultural: NÃO`, left + 200, 206);
-
-      // 4. TOMADOR DE SERVIÇOS (CLIENTE)
-      doc.rect(left, 230, width, 60).stroke('#000000');
-      doc.rect(left, 230, width, 14).fill('#e2e8f0');
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000').text('TOMADOR DE SERVIÇOS', left + 5, 234);
-
-      doc.fontSize(9).font('Helvetica-Bold').text(nfse.tomador_nome || 'SALVADOR ESCRITORIO VIRTUAL LTDA', left + 5, 248);
-      doc.fontSize(7.5).font('Helvetica').text(`CNPJ / CPF: ${nfse.tomador_cnpj || '34.581.300/0001-23'}`, left + 5, 262);
-      doc.text(`Endereço / Município: Salvador - BA`, left + 200, 262);
-      doc.text(`Local da Prestação: Salvador - BA`, left + 390, 262);
-      doc.text(`Telefone / Contato: ${nfse.whatsapp_phone || 'Não informado'}`, left + 5, 274);
-
-      // 5. DISCRIMINAÇÃO DOS SERVIÇOS
-      doc.rect(left, 295, width, 220).stroke('#000000');
-      doc.rect(left, 295, width, 14).fill('#e2e8f0');
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000').text('DISCRIMINAÇÃO DOS SERVIÇOS', left + 5, 299);
-
-      doc.fontSize(8.5).font('Helvetica').text(nfse.discriminacao_servico || 'Prestação de Serviços Contábeis e Assessoria.', left + 8, 318, { width: width - 16, lineGap: 4 });
-
-      // Dados Técnicos e Fiscais no rodapé do quadro
-      doc.fontSize(7).font('Helvetica-Bold').text('CLASSIFICAÇÃO FISCAL DO SERVIÇO:', left + 8, 465);
-      doc.fontSize(7).font('Helvetica').text(`• Item da Lista de Serviços (LC 116/03): 17.01 - Assessoria ou consultoria de qualquer natureza, contabilidade.`, left + 8, 477);
-      doc.text(`• CNAE: 6920-6/01 - Atividades de contabilidade  |  Código de Tributação do Município: 17.01`, left + 8, 489);
-      doc.text(`• Natureza da Operação: 1 - Tributação no Município de Salvador`, left + 8, 501);
-
-      // 6. QUADRO DE RETENÇÕES FEDERAIS
-      doc.rect(left, 520, width, 38).stroke('#000000');
-      doc.rect(left, 520, width, 12).fill('#e2e8f0');
-      doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#000000').text('RETENÇÕES FEDERAIS', left + 5, 523);
-
-      const colW = width / 5;
-      ['PIS', 'COFINS', 'INSS', 'IRPJ', 'CSLL'].forEach((tax, idx) => {
-        doc.fontSize(6).font('Helvetica').text(tax, left + (idx * colW) + 5, 535);
-        doc.fontSize(7.5).font('Helvetica-Bold').text('R$ 0,00', left + (idx * colW) + 5, 545);
+      const pdfBuffer = await nfsePdfGenerator.generateDanfsePdf({
+        numero: nfse.numero_nfse || nfse.numero_rps,
+        codigoVerificacao: nfse.codigo_verificacao,
+        dataEmissao: new Date(nfse.issued_at || Date.now()).toLocaleString('pt-BR'),
+        prestadorNome: nfse.prestador_nome,
+        prestadorCnpj: nfse.prestador_cnpj,
+        prestadorCga: nfse.prestador_cga || (nfse.prestador_cnpj === '11156091000175' ? '0102932500147' : '72516200143'),
+        prestadorMunicipio: 'Salvador',
+        prestadorUf: nfse.uf || 'BA',
+        prestadorEmail: nfse.prestador_email,
+        tomadorNome: nfse.tomador_nome,
+        tomadorDoc: nfse.tomador_cnpj,
+        tomadorMunicipio: 'Salvador',
+        tomadorUf: 'BA',
+        valorServicos: Number(nfse.valor_servicos || 0),
+        aliquota: Number(nfse.aliquota_iss || 5.0),
+        valorIss: Number(nfse.valor_iss || 0),
+        issRetido: !!nfse.iss_retido,
+        discriminacao: nfse.discriminacao_servico,
+        itemServico: nfse.item_servico || '17.19',
+        cnae: nfse.cnae || '6920601',
+        isCancelada: nfse.status === 'cancelada'
       });
 
-      // 7. VALORES E APURAÇÃO DO ISS
-      doc.rect(left, 563, width, 60).stroke('#000000');
-      doc.rect(left, 563, width, 14).fill('#e2e8f0');
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#000000').text('VALOR TOTAL DOS SERVIÇOS E APURAÇÃO DO ISS', left + 5, 567);
-
-      const colValW = width / 4;
-      doc.fontSize(6.5).font('Helvetica').text('VALOR DOS SERVIÇOS', left + 5, 582);
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#047857').text(`R$ ${Number(nfse.valor_servicos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, left + 5, 592);
-      doc.fillColor('#000000');
-
-      doc.fontSize(6.5).font('Helvetica').text('BASE DE CÁLCULO', left + colValW + 5, 582);
-      doc.fontSize(9).font('Helvetica-Bold').text(`R$ ${Number(nfse.valor_servicos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, left + colValW + 5, 593);
-
-      doc.fontSize(6.5).font('Helvetica').text('ALÍQUOTA (%)', left + (colValW * 2) + 5, 582);
-      doc.fontSize(9).font('Helvetica-Bold').text(`${Number(nfse.aliquota_iss || 5.0).toFixed(2)} %`, left + (colValW * 2) + 5, 593);
-
-      doc.fontSize(6.5).font('Helvetica').text('VALOR DO ISS', left + (colValW * 3) + 5, 582);
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#047857').text(`R$ ${Number(nfse.valor_iss || 0.50).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, left + (colValW * 3) + 5, 592);
-      doc.fillColor('#000000');
-
-      doc.fontSize(6.5).font('Helvetica').text(`Desconto Incondicionado: R$ 0,00  •  Desconto Condicionado: R$ 0,00  •  Deduções: R$ 0,00  •  ISS Retido: NÃO`, left + 5, 610);
-
-      // 8. VALOR LÍQUIDO OFICIAL
-      doc.rect(left, 628, width, 30).fillAndStroke('#ecfdf5', '#047857');
-      doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#065f46').text('VALOR LÍQUIDO DA NOTA FISCAL:', left + 10, 638);
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#065f46').text(`R$ ${Number(nfse.valor_servicos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, left + 410, 636, { width: 130, align: 'right' });
-      doc.fillColor('#000000');
-
-      // 9. OUTRAS INFORMAÇÕES E CHAVE DE AUTENTICIDADE
-      doc.rect(left, 663, width, 60).stroke('#000000');
-      doc.fontSize(6.5).font('Helvetica-Bold').text('INFORMAÇÕES COMPLEMENTARES E CONTROLE DO FISCO', left + 5, 668);
-      doc.fontSize(6).font('Helvetica').text(`• Nota Fiscal de Serviço Eletrônica emitida em conformidade com o Padrão ABRASF e legislação tributária do Município de Salvador.`, left + 5, 678);
-      doc.text(`• A autenticidade deste documento pode ser confirmada no portal da SEFAZ com o CNPJ do Prestador e o Código de Verificação: ${nfse.codigo_verificacao}.`, left + 5, 688);
-      doc.text(`• Documento emitido por ME ou EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de IPI.`, left + 5, 698);
-      doc.text(`• Chave de Acesso Digital: ${nfse.id.replace(/-/g, '').toUpperCase()}${nfse.codigo_verificacao} | Sistema ViaNfe Cloud`, left + 5, 708);
-
-      // Selo de Autenticação Digital Rodapé
-      doc.fontSize(6).font('Helvetica-Oblique').fillColor('#64748b');
-      doc.text(`DANFSe Gerado Eletronicamente pelo Hub Fiscal ViaNfe • Data/Hora de Impressão: ${new Date().toLocaleString('pt-BR')}`, left, 730, { align: 'center', width: width });
-
-      doc.end();
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="DANFSE_${nfse.numero_nfse || nfse.numero_rps}.pdf"`);
+      res.send(pdfBuffer);
     } catch (err: any) {
       res.status(500).send(err.message);
     }
@@ -852,6 +848,161 @@ export const nfseController = {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  },
+
+  /**
+   * Sincronização Mensal Automática / Manual de NFS-e (Salvador ABRASF)
+   */
+  async syncMonthlyNfse(req: Request, res: Response): Promise<void> {
+    try {
+      const companyId = (req.body.company_id || req.body.companyId || req.query.company_id) as string;
+      let ano = parseInt(String(req.body.ano || req.body.year || new Date().getFullYear()), 10);
+      let mes = parseInt(String(req.body.mes || req.body.month || (new Date().getMonth() + 1)), 10);
+
+      // Suporte para parâmetro "competencia" formato MM/AAAA ou MM.AAAA
+      if (req.body.competencia) {
+        const parts = String(req.body.competencia).replace('/', '.').split('.');
+        if (parts.length === 2) {
+          mes = parseInt(parts[0], 10);
+          ano = parseInt(parts[1], 10);
+        }
+      }
+
+      if (!companyId) {
+        res.status(400).json({ error: 'company_id é obrigatório.' });
+        return;
+      }
+
+      const { salvadorNfseMonthlyService } = await import('../services/salvadorNfseMonthlyService.js');
+      const result = await salvadorNfseMonthlyService.syncMonthlyNfse(companyId, ano, mes);
+      res.json(result);
+    } catch (err: any) {
+      console.error('❌ [NFS-e Controller] Erro na sincronização mensal:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  /**
+   * Stream do Relatório Oficial de Auditoria e Conferência Mensal em PDF
+   */
+  async getMonthlyReportPdf(req: Request, res: Response): Promise<void> {
+    try {
+      const companyId = String(req.params.companyId);
+      const mesAno = String(req.params.mesAno);
+      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
+      if (!company) {
+        res.status(404).send('Empresa não encontrada.');
+        return;
+      }
+
+      const cleanCnpj = (company.cnpj || '').replace(/\D/g, '');
+      const [mesStr, anoStr] = mesAno.split('.');
+      const reportPath = path.resolve(__dirname, `../../storage/exports/nfse/${cleanCnpj}/${anoStr}/${mesAno}/RELATORIO_CONFERENCIA_NFSE_${mesAno}.pdf`);
+
+      if (fs.existsSync(reportPath)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="RELATORIO_CONFERENCIA_NFSE_${cleanCnpj}_${mesAno}.pdf"`);
+        const stream = fs.createReadStream(reportPath);
+        stream.pipe(res);
+        return;
+      }
+
+      // Se o relatório ainda não existir em disco, tenta sincronizar e gerar na hora
+      const { salvadorNfseMonthlyService } = await import('../services/salvadorNfseMonthlyService.js');
+      const syncRes = await salvadorNfseMonthlyService.syncMonthlyNfse(companyId, parseInt(anoStr, 10), parseInt(mesStr, 10));
+
+      if (syncRes.arquivosGerados.relatorioConferenciaPdf && fs.existsSync(syncRes.arquivosGerados.relatorioConferenciaPdf)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="RELATORIO_CONFERENCIA_NFSE_${cleanCnpj}_${mesAno}.pdf"`);
+        const stream = fs.createReadStream(syncRes.arquivosGerados.relatorioConferenciaPdf);
+        stream.pipe(res);
+      } else {
+        res.status(404).send('Nenhum relatório de conferência disponível para esta competência.');
+      }
+    } catch (err: any) {
+      res.status(500).send(`Erro ao gerar relatório de conferência: ${err.message}`);
+    }
+  },
+
+  /**
+   * Obter Resumo / Auditoria da Competência em JSON
+   */
+  async getMonthlySummary(req: Request, res: Response): Promise<void> {
+    try {
+      const companyId = String(req.params.companyId);
+      const mesAno = String(req.params.mesAno);
+      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
+      if (!company) {
+        res.status(404).json({ error: 'Empresa não encontrada.' });
+        return;
+      }
+
+      const [mesStr, anoStr] = mesAno.split('.');
+      const startDate = `${anoStr}-${mesStr}-01`;
+      const endDate = `${anoStr}-${mesStr}-31`;
+
+      const invoices = db.prepare(`
+        SELECT numero, data_emissao, emitente_nome, destinatario_nome, destinatario_cnpj, valor_total, status
+        FROM invoices
+        WHERE company_id = ? AND modelo = 'NFS-e' AND data_emissao >= ? AND data_emissao <= ?
+        ORDER BY CAST(numero AS INTEGER) ASC
+      `).all(companyId, startDate, endDate) as any[];
+
+      const totalServicos = invoices.reduce((acc, inv) => acc + (inv.status !== 'cancelada' ? inv.valor_total : 0), 0);
+      const canceladas = invoices.filter(inv => inv.status === 'cancelada').length;
+
+      res.json({
+        empresa: company.razao_social,
+        cnpj: company.cnpj,
+        cga: company.inscricao_municipal,
+        competencia: mesAno,
+        totalNotas: invoices.length,
+        canceladas,
+        totalServicos,
+        primeiraNota: invoices.length > 0 ? invoices[0].numero : null,
+        ultimaNota: invoices.length > 0 ? invoices[invoices.length - 1].numero : null,
+        notas: invoices
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  /**
+   * Varredura em Lote de todas as empresas ativas para uma competência
+   */
+  async batchSyncMonth(req: Request, res: Response): Promise<void> {
+    try {
+      let ano = parseInt(String(req.body.ano || new Date().getFullYear()), 10);
+      let mes = parseInt(String(req.body.mes || new Date().getMonth() + 1), 10);
+
+      const companies = db.prepare(`
+        SELECT id, razao_social, cnpj, inscricao_municipal, cert_filename
+        FROM companies
+        WHERE status = 'ativo' AND emite_nfse = 1 AND cert_filename IS NOT NULL AND inscricao_municipal IS NOT NULL AND inscricao_municipal != ''
+      `).all() as any[];
+
+      const { salvadorNfseMonthlyService } = await import('../services/salvadorNfseMonthlyService.js');
+      const results: any[] = [];
+
+      for (const comp of companies) {
+        try {
+          const resSync = await salvadorNfseMonthlyService.syncMonthlyNfse(comp.id, ano, mes);
+          results.push({ company: comp.razao_social, status: 'success', totalNotas: resSync.totalNotas });
+        } catch (compErr: any) {
+          results.push({ company: comp.razao_social, status: 'error', error: compErr.message });
+        }
+      }
+
+      res.json({
+        competencia: `${String(mes).padStart(2, '0')}.${ano}`,
+        totalProcessadas: companies.length,
+        resultados: results
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   }
 };
+
 

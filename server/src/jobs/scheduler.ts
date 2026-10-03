@@ -113,9 +113,67 @@ export function initScheduler() {
     predictiveAlertsService.runDailyBatchAlerts().catch(e => console.error('[ROBÔ RADAR WHATSAPP] Erro no ciclo matinal:', e.message));
   }, { timezone: 'America/Sao_Paulo' });
 
-  console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna (01:00 às 03:00):');
+  /**
+   * Helper function: Executa a sincronização mensal de NFS-e para todas as empresas prestadoras com certificado A1 e CGA
+   */
+  const runNfseMonthlyBatchSync = async (triggerOrigin: string) => {
+    console.log(`🤖 [ROBÔ NFS-E MENSAL - ${triggerOrigin}] Iniciando fechamento de competência...`);
+    try {
+      // Competência anterior à atual
+      const now = new Date();
+      let mesCompetencia = now.getMonth(); // Mês anterior (0-11 -> 0 é janeiro)
+      let anoCompetencia = now.getFullYear();
+      if (mesCompetencia === 0) {
+        mesCompetencia = 12;
+        anoCompetencia -= 1;
+      }
+
+      const activeCompanies = db.prepare(`
+        SELECT id, razao_social, cnpj, inscricao_municipal, cert_filename 
+        FROM companies 
+        WHERE status = 'ativo' AND emite_nfse = 1 AND cert_filename IS NOT NULL AND inscricao_municipal IS NOT NULL AND inscricao_municipal != ''
+      `).all() as any[];
+
+      console.log(`📋 [ROBÔ NFS-E MENSAL] ${activeCompanies.length} empresas elegíveis para a competência ${String(mesCompetencia).padStart(2, '0')}/${anoCompetencia}.`);
+
+      const { salvadorNfseMonthlyService } = await import('../services/salvadorNfseMonthlyService.js');
+      let totalNotasLote = 0;
+
+      for (const comp of activeCompanies) {
+        try {
+          console.log(`⚡ [ROBÔ NFS-E] Auditando ${comp.razao_social} (CNPJ: ${comp.cnpj})...`);
+          const res = await salvadorNfseMonthlyService.syncMonthlyNfse(comp.id, anoCompetencia, mesCompetencia);
+          totalNotasLote += (res?.totalNotas || 0);
+          console.log(`✅ [ROBÔ NFS-E] ${comp.razao_social}: ${res?.totalNotas || 0} notas processadas.`);
+          // Pausa preventiva de 3s
+          await new Promise(r => setTimeout(r, 3000));
+        } catch (compErr: any) {
+          console.warn(`⚠️ [ROBÔ NFS-E] Aviso na empresa ${comp.razao_social}:`, compErr.message);
+        }
+      }
+
+      console.log(`🏁 [ROBÔ NFS-E MENSAL - ${triggerOrigin}] Fechamento finalizado! Total de notas capturadas no lote: ${totalNotasLote}`);
+    } catch (err: any) {
+      console.error(`❌ [ROBÔ NFS-E MENSAL - ${triggerOrigin}] Erro crítico:`, err.message);
+    }
+  };
+
+  // 4. Robô Mensal de NFS-e (1º dia do mês às 06:00 BRT - Horário de Brasília)
+  cron.schedule('0 6 1 * *', () => {
+    runNfseMonthlyBatchSync('DIA_01_06H00');
+  });
+
+  // 5. Repescagem Mensal de NFS-e (3º dia do mês às 06:00 BRT - Horário de Brasília)
+  cron.schedule('0 6 3 * *', () => {
+    runNfseMonthlyBatchSync('REPESCAGEM_DIA_03_06H00');
+  });
+
+  console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna e Mensal:');
   console.log('  └─ Varredura Madrugada 1: Diariamente às 01:15 AM (Brasília)');
   console.log('  └─ Varredura Madrugada 2: Diariamente às 02:30 AM (Brasília)');
   console.log('  └─ Backup Nuvem Drive: A cada 30 minutos (local para G:)');
   console.log('  └─ Radar Alertas Preditivos WhatsApp: Diariamente às 09:30 AM (Brasília)');
+  console.log('  └─ Fechamento Mensal NFS-e: Dia 1º às 06:00 AM (Brasília)');
+  console.log('  └─ Repescagem Mensal NFS-e: Dia 3º às 06:00 AM (Brasília)');
 }
+

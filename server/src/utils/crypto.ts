@@ -49,6 +49,6 @@ export function formatChaveAcesso(chave: string): string {
   return clean.replace(/(\d{4})/g, '$1 ').trim();
 }
 
-export function cleanNumeric(str: string): string {
-  return (str || '').replace(/\D/g, '');
+export function cleanNumeric(str: any): string {
+  return String(str ?? '').replace(/\D/g, '');
 }

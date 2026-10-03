@@ -106,8 +106,14 @@ router.get('/portal/nfse/clients', verifyJwtAndTenant, nfseController.getRecurri
 router.post('/portal/nfse/clients', verifyJwtAndTenant, nfseController.saveRecurringClient);
 router.delete('/portal/nfse/clients/:id', verifyJwtAndTenant, nfseController.deleteRecurringClient);
 router.get('/portal/nfse/focus-config', verifyJwtAndTenant, nfseController.getFocusNfeConfig);
-router.post('/portal/nfse/focus-config', verifyJwtAndTenant, nfseController.saveFocusNfeConfig);
 router.post('/portal/nfse/webhook-whatsapp', nfseController.handleWhatsappWebhook); // Webhook integration
+
+// Módulo Oficial NFS-e Salvador / Nacional ADN - Auditoria e Fechamento Mensal
+router.post('/nfse/monthly-sync', verifyJwtAndTenant, nfseController.syncMonthlyNfse);
+router.get('/nfse/monthly-report/:companyId/:mesAno/pdf', optionalJwtOrPublicDoc, nfseController.getMonthlyReportPdf);
+router.get('/nfse/monthly-summary/:companyId/:mesAno', verifyJwtAndTenant, nfseController.getMonthlySummary);
+router.post('/nfse/batch-sync-month', verifyJwtAndTenant, nfseController.batchSyncMonth);
+
 
 // ============================================================================
 // SUPER APP VIACONT (ÁREA DO CLIENTE) REST API ROUTES

@@ -32,6 +32,8 @@ export class NfseAdapterFactory {
    */
   static getAdapter(prefeituraOuIbge: string): INfseAdapter {
     const key = (prefeituraOuIbge || 'salvador').trim().toLowerCase();
+    if (key.includes('focus')) return this.adapters.get('focus_nfe')!;
+    if (key.includes('salvador')) return this.adapters.get('salvador')!;
     const adapter = this.adapters.get(key);
     if (!adapter) {
       // Fallback para Salvador ou Nacional
