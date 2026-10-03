@@ -20,6 +20,337 @@ export const SUPPORTED_PREFEITURAS = [
   'Portal Nacional ADN (nfse.gov.br)'
 ];
 
+export interface ProcessNfseEmissionParams {
+  company: any;
+  prefeitura: string;
+  tomador_cnpj: string;
+  tomador_nome: string;
+  valor_servicos: number;
+  aliquota_iss?: number;
+  discriminacao_servico: string;
+  whatsapp_phone?: string;
+  iss_retido?: boolean | number;
+  item_servico?: string;
+  numero_rps?: number | string;
+  serie_rps?: string;
+  provedor?: string;
+  focus_nfe_token?: string;
+  ambiente?: string;
+  senha_prefeitura?: string;
+  cnae?: string;
+}
+
+export interface ProcessNfseEmissionResult {
+  id: string;
+  numeroNfse: string;
+  numeroRps: string;
+  serieRps: string;
+  codigoVerificacao: string;
+  prefeitura: string;
+  valorTotal: number;
+  valorIss: number;
+  issRetido: boolean;
+  statusNfse: string;
+  successMessage: string;
+  pdfUrl: string;
+  xmlUrl: string;
+  pdfPath: string;
+  xmlPath: string;
+}
+
+export async function processNfseEmissionCore(params: ProcessNfseEmissionParams): Promise<ProcessNfseEmissionResult> {
+  const { company } = params;
+
+  // 🛡️ Bloqueio para Empresas de Comércio Puro (não emissoras de NFS-e)
+  if (company.emite_nfse === 0 || company.emite_nfse === false || company.emite_nfse === '0') {
+    throw new Error(`A empresa "${company.razao_social}" está cadastrada como Comércio Puro (não emissora de NFS-e). Emissão bloqueada.`);
+  }
+
+  // Sequential RPS Tracking
+  const currentLastRps = Number(company.ultimo_rps_numero || 0);
+  const nextRpsNum = params.numero_rps ? Number(params.numero_rps) : (currentLastRps + 1);
+  const chosenSerieRps = String(params.serie_rps || company.serie_rps || '1').trim();
+
+  const aliquota = Number(params.aliquota_iss) || company.nfse_aliquota_padrao || 5.0;
+  const valorIss = (Number(params.valor_servicos) * aliquota) / 100;
+  const newId = uuidv4();
+  const nowIso = new Date().toISOString();
+
+  let numeroNfse = `${new Date().getFullYear()}${nextRpsNum}`;
+  let codigoVerificacao = Math.random().toString(36).substring(2, 10).toUpperCase();
+  let statusNfse = 'emitida';
+  let successMessage = `NFS-e emitida com sucesso (RPS Nº ${nextRpsNum} - Série ${chosenSerieRps})!`;
+  let pdfUrlReturned: string | undefined = undefined;
+  let adapterResultXml: string | undefined = undefined;
+
+  // 🏛️ Multi-City Transmission Architecture (Robô Salvador, Webservice Direto A1 ou Focus NFe)
+  const incomingFocusToken = params.focus_nfe_token ? String(params.focus_nfe_token).trim() : '';
+  const effectiveToken = incomingFocusToken || company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN || '';
+  let provedorSolicitado = params.provedor || company.nfse_provedor;
+
+  let passDecrypted = company.nfse_senha_prefeitura || params.senha_prefeitura || '';
+  try {
+    if (passDecrypted) passDecrypted = decryptText(passDecrypted);
+  } catch (_) {}
+
+  // Fallback inteligente: se robo_salvador foi solicitado mas não há senha e existe certificado A1, usa webservice_direto
+  if ((!provedorSolicitado || provedorSolicitado === 'robo_salvador' || provedorSolicitado === 'robo') && !passDecrypted && company.cert_filename) {
+    console.log(`ℹ️ [Emissão NFS-e] Senha da prefeitura não cadastrada. Redirecionando automaticamente para Webservice Direto com Certificado A1.`);
+    provedorSolicitado = 'webservice_direto';
+  }
+  // Fallback inteligente: se focus_nfe foi solicitado mas não há token e existe certificado A1, usa webservice_direto
+  if (provedorSolicitado === 'focus_nfe' && !effectiveToken && company.cert_filename) {
+    console.log(`ℹ️ [Emissão NFS-e] Token da Focus NFe não configurado. Redirecionando automaticamente para Webservice Direto com Certificado A1.`);
+    provedorSolicitado = 'webservice_direto';
+  }
+  if (!provedorSolicitado) {
+    provedorSolicitado = effectiveToken ? 'focus_nfe' : (company.cert_filename ? 'webservice_direto' : 'robo_salvador');
+  }
+
+  if (incomingFocusToken && incomingFocusToken !== company.focus_nfe_token) {
+    try {
+      db.prepare('UPDATE companies SET focus_nfe_token = ? WHERE id = ?').run(incomingFocusToken, company.id);
+      company.focus_nfe_token = incomingFocusToken;
+    } catch (_) {}
+  }
+
+  if (provedorSolicitado === 'robo_salvador' || (params.prefeitura === 'Salvador' && provedorSolicitado === 'robo')) {
+    console.log(`🤖 [Emissão NFS-e] Acionando Robô Automatizado Nota Salvador para RPS Nº ${nextRpsNum}...`);
+    if (!passDecrypted) {
+      throw new Error('Senha da Prefeitura de Salvador não encontrada. Acesse o menu Empresas ou preencha a senha no cadastro.');
+    }
+
+    const robotResult = await salvadorRobotService.emitirNfseSalvador({
+      usuario: company.nfse_usuario_prefeitura || company.cnpj,
+      senha: passDecrypted,
+      tomadorCnpjCpf: params.tomador_cnpj,
+      tomadorNome: params.tomador_nome,
+      valorServicos: Number(params.valor_servicos),
+      aliquotaIss: aliquota,
+      issRetido: !!params.iss_retido,
+      itemServico: params.item_servico,
+      discriminacao: params.discriminacao_servico,
+      numeroRps: String(nextRpsNum),
+      serieRps: chosenSerieRps
+    });
+
+    if (robotResult.success) {
+      numeroNfse = robotResult.numeroNfse;
+      codigoVerificacao = robotResult.codigoVerificacao;
+      statusNfse = 'autorizada';
+      successMessage = robotResult.mensagem;
+      if (robotResult.linkVisualizacao) {
+        pdfUrlReturned = robotResult.linkVisualizacao;
+      }
+    }
+  } else if ((provedorSolicitado === 'focus_nfe' || (effectiveToken && provedorSolicitado !== 'webservice_direto')) && effectiveToken) {
+    const focusAdapter = NfseAdapterFactory.getAdapter('focus_nfe');
+    const result = await focusAdapter.emitir({
+      company,
+      numeroRps: String(nextRpsNum),
+      serieRps: chosenSerieRps,
+      tipoRps: '1',
+      optanteSimplesNacional: '1',
+      incentivadorCultural: '2',
+      naturezaOperacao: '1',
+      tomadorCnpjCpf: params.tomador_cnpj,
+      tomadorNome: params.tomador_nome,
+      valorServicos: Number(params.valor_servicos),
+      aliquotaIss: aliquota,
+      issRetido: !!params.iss_retido,
+      itemServico: params.item_servico || company.item_servico_padrao || '17.01',
+      cnae: params.cnae || company.cnae_padrao || '6920601',
+      discriminacao: params.discriminacao_servico,
+      ambiente: params.ambiente || company.sefaz_ambiente || 'producao',
+      focusNfeToken: effectiveToken
+    });
+
+    if (result.success) {
+      numeroNfse = result.numeroNfse || `RPS-${nextRpsNum}`;
+      codigoVerificacao = result.codigoVerificacao || Math.random().toString(36).substring(2, 10).toUpperCase();
+      statusNfse = result.status;
+      successMessage = result.mensagem;
+      if (result.pdfUrl) {
+        pdfUrlReturned = result.pdfUrl;
+      }
+    } else {
+      throw new Error(result.mensagem || result.motivoRejeicao || 'Rejeição na Focus NFe');
+    }
+  } else {
+    const adapter = NfseAdapterFactory.getAdapter(params.prefeitura);
+    const result = await adapter.emitir({
+      company,
+      numeroRps: String(nextRpsNum),
+      serieRps: chosenSerieRps,
+      tipoRps: '1',
+      optanteSimplesNacional: company.sefaz_ambiente === 'homologacao' ? '2' : '2',
+      incentivadorCultural: '2',
+      naturezaOperacao: '1',
+      tomadorCnpjCpf: params.tomador_cnpj,
+      tomadorNome: params.tomador_nome,
+      valorServicos: Number(params.valor_servicos),
+      aliquotaIss: aliquota,
+      issRetido: !!params.iss_retido,
+      itemServico: params.item_servico || company.item_servico_padrao || '17.01',
+      cnae: params.cnae || company.cnae_padrao || '6920601',
+      discriminacao: params.discriminacao_servico,
+      ambiente: params.ambiente || company.sefaz_ambiente || 'producao'
+    });
+
+    if (result.success) {
+      numeroNfse = result.numeroNfse || `RPS-${nextRpsNum}`;
+      codigoVerificacao = result.codigoVerificacao || Math.random().toString(36).substring(2, 10).toUpperCase();
+      statusNfse = result.status;
+      successMessage = result.mensagem;
+      if (result.xmlRetorno || result.xmlEnviado) {
+        adapterResultXml = result.xmlRetorno || result.xmlEnviado;
+      }
+    }
+  }
+
+  // Update company's latest RPS counter
+  db.prepare(`
+    UPDATE companies SET 
+      ultimo_rps_numero = MAX(COALESCE(ultimo_rps_numero, 0), ?),
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).run(nextRpsNum, company.id);
+
+  db.prepare(`
+    INSERT INTO nfse_issued (
+      id, company_id, prefeitura, numero_nfse, codigo_verificacao,
+      prestador_cnpj, tomador_cnpj, tomador_nome, valor_servicos,
+      aliquota_iss, valor_iss, discriminacao_servico, status,
+      pdf_url, whatsapp_phone, numero_rps, serie_rps, issued_at
+    ) VALUES (
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?, ?
+    )
+  `).run(
+    newId,
+    company.id,
+    params.prefeitura,
+    numeroNfse,
+    codigoVerificacao,
+    company.cnpj,
+    params.tomador_cnpj.replace(/\D/g, ''),
+    params.tomador_nome.trim(),
+    Number(params.valor_servicos),
+    aliquota,
+    valorIss,
+    params.discriminacao_servico.trim(),
+    statusNfse,
+    pdfUrlReturned || `/api/portal/nfse/${newId}/pdf`,
+    params.whatsapp_phone || null,
+    String(nextRpsNum),
+    chosenSerieRps,
+    nowIso
+  );
+
+  // Salva o XML emitido e gera o DANFSe em PDF oficial
+  const now = new Date();
+  const anoStr = String(now.getFullYear());
+  const mesStr = `${String(now.getMonth() + 1).padStart(2, '0')}.${anoStr}`;
+  const exportDir = path.resolve(__dirname, `../../storage/exports/nfse/${company.cnpj}/${anoStr}/${mesStr}`);
+  if (!fs.existsSync(exportDir)) {
+    fs.mkdirSync(exportDir, { recursive: true });
+  }
+
+  const numPad8 = String(numeroNfse || nextRpsNum).padStart(8, '0');
+  const xmlPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.xml`);
+  const pdfPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.pdf`);
+
+  if (adapterResultXml) {
+    try { fs.writeFileSync(xmlPath, adapterResultXml, 'utf8'); } catch (_) {}
+  }
+
+  try {
+    await nfsePdfGenerator.generateDanfsePdf({
+      numero: String(numeroNfse || nextRpsNum),
+      codigoVerificacao,
+      dataEmissao: new Date().toLocaleString('pt-BR'),
+      prestadorNome: company.razao_social,
+      prestadorCnpj: company.cnpj,
+      prestadorCga: company.inscricao_municipal || (company.cnpj === '11156091000175' ? '0102932500147' : '72516200143'),
+      prestadorMunicipio: 'Salvador',
+      prestadorUf: company.uf || 'BA',
+      prestadorEmail: company.email,
+      tomadorNome: params.tomador_nome.trim(),
+      tomadorDoc: params.tomador_cnpj.replace(/\D/g, ''),
+      tomadorMunicipio: 'Salvador',
+      tomadorUf: 'BA',
+      valorServicos: Number(params.valor_servicos),
+      aliquota,
+      valorIss,
+      issRetido: !!params.iss_retido,
+      discriminacao: params.discriminacao_servico.trim(),
+      itemServico: params.item_servico || company.item_servico_padrao || '17.19',
+      cnae: params.cnae || company.cnae_padrao || '6920601',
+      isCancelada: false
+    }, pdfPath);
+  } catch (pdfErr) {
+    console.warn('Aviso geração DANFSe PDF pós-emissão:', pdfErr);
+  }
+
+  // Inserção na tabela invoices para visualização imediata no Dashboard
+  const chaveAcesso = `NFSE${company.cnpj}${numPad8}`;
+  const invId = uuidv4();
+  try {
+    db.prepare(`
+      INSERT OR REPLACE INTO invoices (
+        id, company_id, chave_acesso, numero, serie, modelo, tipo, status,
+        natureza_operacao, data_emissao, emitente_cnpj, emitente_nome, emitente_uf,
+        destinatario_cnpj, destinatario_nome, destinatario_uf, valor_total, valor_produtos,
+        xml_file_path, pdf_file_path, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, 'NFS-e', '1', 'autorizada',
+        'Prestação de Serviços', ?, ?, ?, ?,
+        ?, ?, 'BA', ?, ?,
+        ?, ?, ?
+      )
+    `).run(
+      invId,
+      company.id,
+      chaveAcesso,
+      String(numeroNfse || nextRpsNum),
+      chosenSerieRps,
+      nowIso,
+      company.cnpj,
+      company.razao_social,
+      company.uf || 'BA',
+      params.tomador_cnpj.replace(/\D/g, ''),
+      params.tomador_nome.trim(),
+      Number(params.valor_servicos),
+      Number(params.valor_servicos),
+      fs.existsSync(xmlPath) ? xmlPath : null,
+      fs.existsSync(pdfPath) ? pdfPath : null,
+      nowIso
+    );
+  } catch (errInv: any) {
+    console.warn('Aviso inserção invoices:', errInv.message);
+  }
+
+  return {
+    id: newId,
+    numeroNfse,
+    numeroRps: String(nextRpsNum),
+    serieRps: chosenSerieRps,
+    codigoVerificacao,
+    prefeitura: params.prefeitura,
+    valorTotal: Number(params.valor_servicos),
+    valorIss,
+    issRetido: !!params.iss_retido,
+    statusNfse,
+    successMessage,
+    pdfUrl: pdfUrlReturned || `/api/portal/nfse/${newId}/pdf`,
+    xmlUrl: `/api/portal/nfse/${newId}/xml`,
+    pdfPath,
+    xmlPath
+  };
+}
+
 export const nfseController = {
   /**
    * Get all emitted NFS-e for a company
@@ -56,7 +387,12 @@ export const nfseController = {
         iss_retido,
         item_servico,
         numero_rps,
-        serie_rps
+        serie_rps,
+        provedor,
+        focus_nfe_token,
+        ambiente,
+        senha_prefeitura,
+        cnae
       } = req.body;
 
       if (!company_id || !prefeitura || !tomador_cnpj || !tomador_nome || !valor_servicos || !discriminacao_servico) {
@@ -70,294 +406,43 @@ export const nfseController = {
         return;
       }
 
-      // 🛡️ Bloqueio para Empresas de Comércio Puro (não emissoras de NFS-e)
-      if (company.emite_nfse === 0 || company.emite_nfse === false || company.emite_nfse === '0') {
-        res.status(400).json({
-          error: `A empresa "${company.razao_social}" está cadastrada como Comércio Puro (não emissora de NFS-e). Emissão bloqueada.`
-        });
-        return;
-      }
-
-      // Sequential RPS Tracking
-      const currentLastRps = Number(company.ultimo_rps_numero || 0);
-      const nextRpsNum = numero_rps ? Number(numero_rps) : (currentLastRps + 1);
-      const chosenSerieRps = String(serie_rps || company.serie_rps || '1').trim();
-
-      const aliquota = Number(aliquota_iss) || company.nfse_aliquota_padrao || 5.0;
-      const valorIss = (Number(valor_servicos) * aliquota) / 100;
-      const newId = uuidv4();
-      const nowIso = new Date().toISOString();
-
-      let numeroNfse = `${new Date().getFullYear()}${nextRpsNum}`;
-      let codigoVerificacao = Math.random().toString(36).substring(2, 10).toUpperCase();
-      let statusNfse = 'emitida';
-      let successMessage = `NFS-e emitida com sucesso (RPS Nº ${nextRpsNum} - Série ${chosenSerieRps})!`;
-      let pdfUrlReturned: string | undefined = undefined;
-      let adapterResultXml: string | undefined = undefined;
-
-      // 🏛️ Multi-City Transmission Architecture (Robô Salvador, Webservice Direto A1 ou Focus NFe)
-      try {
-        const incomingFocusToken = req.body.focus_nfe_token ? String(req.body.focus_nfe_token).trim() : '';
-        const effectiveToken = incomingFocusToken || company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN || '';
-        let provedorSolicitado = req.body.provedor || company.nfse_provedor;
-
-        let passDecrypted = company.nfse_senha_prefeitura || req.body.senha_prefeitura || '';
-        try {
-          if (passDecrypted) passDecrypted = decryptText(passDecrypted);
-        } catch (_) {}
-
-        // Fallback inteligente: se robo_salvador foi solicitado mas não há senha e existe certificado A1, usa webservice_direto
-        if ((!provedorSolicitado || provedorSolicitado === 'robo_salvador' || provedorSolicitado === 'robo') && !passDecrypted && company.cert_filename) {
-          console.log(`ℹ️ [Emissão NFS-e] Senha da prefeitura não cadastrada. Redirecionando automaticamente para Webservice Direto com Certificado A1.`);
-          provedorSolicitado = 'webservice_direto';
-        }
-        if (!provedorSolicitado) {
-          provedorSolicitado = effectiveToken ? 'focus_nfe' : (company.cert_filename ? 'webservice_direto' : 'robo_salvador');
-        }
-
-        if (incomingFocusToken && incomingFocusToken !== company.focus_nfe_token) {
-          try {
-            db.prepare('UPDATE companies SET focus_nfe_token = ? WHERE id = ?').run(incomingFocusToken, company.id);
-            company.focus_nfe_token = incomingFocusToken;
-          } catch (_) {}
-        }
-
-        if (provedorSolicitado === 'robo_salvador' || (prefeitura === 'Salvador' && provedorSolicitado === 'robo')) {
-          console.log(`🤖 [Emissão NFS-e] Acionando Robô Automatizado Nota Salvador para RPS Nº ${nextRpsNum}...`);
-          if (!passDecrypted) {
-            throw new Error('Senha da Prefeitura de Salvador não encontrada. Acesse o menu Empresas ou preencha a senha no cadastro.');
-          }
-
-          const robotResult = await salvadorRobotService.emitirNfseSalvador({
-            usuario: company.nfse_usuario_prefeitura || company.cnpj,
-            senha: passDecrypted,
-            tomadorCnpjCpf: tomador_cnpj,
-            tomadorNome: tomador_nome,
-            valorServicos: Number(valor_servicos),
-            aliquotaIss: aliquota,
-            issRetido: !!iss_retido,
-            itemServico: item_servico,
-            discriminacao: discriminacao_servico,
-            numeroRps: String(nextRpsNum),
-            serieRps: chosenSerieRps
-          });
-
-          if (robotResult.success) {
-            numeroNfse = robotResult.numeroNfse;
-            codigoVerificacao = robotResult.codigoVerificacao;
-            statusNfse = 'autorizada';
-            successMessage = robotResult.mensagem;
-            if (robotResult.linkVisualizacao) {
-              pdfUrlReturned = robotResult.linkVisualizacao;
-            }
-          }
-        } else if (provedorSolicitado === 'focus_nfe' || (effectiveToken && provedorSolicitado !== 'webservice_direto')) {
-          const focusAdapter = NfseAdapterFactory.getAdapter('focus_nfe');
-          const result = await focusAdapter.emitir({
-            company,
-            numeroRps: String(nextRpsNum),
-            serieRps: chosenSerieRps,
-            tipoRps: '1',
-            optanteSimplesNacional: '1',
-            incentivadorCultural: '2',
-            naturezaOperacao: '1',
-            tomadorCnpjCpf: tomador_cnpj,
-            tomadorNome: tomador_nome,
-            valorServicos: Number(valor_servicos),
-            aliquotaIss: aliquota,
-            issRetido: !!iss_retido,
-            itemServico: item_servico || company.item_servico_padrao || '17.01',
-            cnae: company.cnae_padrao || '6920601',
-            discriminacao: discriminacao_servico,
-            ambiente: req.body.ambiente || company.sefaz_ambiente || 'producao',
-            focusNfeToken: effectiveToken
-          });
-
-          if (result.success) {
-            numeroNfse = result.numeroNfse || `RPS-${nextRpsNum}`;
-            codigoVerificacao = result.codigoVerificacao || Math.random().toString(36).substring(2, 10).toUpperCase();
-            statusNfse = result.status;
-            successMessage = result.mensagem;
-            if (result.pdfUrl) {
-              pdfUrlReturned = result.pdfUrl;
-            }
-          } else {
-            throw new Error(result.mensagem || result.motivoRejeicao || 'Rejeição na Focus NFe');
-          }
-        } else {
-          const adapter = NfseAdapterFactory.getAdapter(prefeitura);
-          const result = await adapter.emitir({
-            company,
-            numeroRps: String(nextRpsNum),
-            serieRps: chosenSerieRps,
-            tipoRps: '1',
-            optanteSimplesNacional: company.sefaz_ambiente === 'homologacao' ? '2' : '2',
-            incentivadorCultural: '2',
-            naturezaOperacao: '1',
-            tomadorCnpjCpf: tomador_cnpj,
-            tomadorNome: tomador_nome,
-            valorServicos: Number(valor_servicos),
-            aliquotaIss: aliquota,
-            issRetido: !!iss_retido,
-            itemServico: item_servico || company.item_servico_padrao || '17.01',
-            cnae: company.cnae_padrao || '6920601',
-            discriminacao: discriminacao_servico,
-            ambiente: company.sefaz_ambiente || 'producao'
-          });
-
-          if (result.success) {
-            numeroNfse = result.numeroNfse || `RPS-${nextRpsNum}`;
-            codigoVerificacao = result.codigoVerificacao || Math.random().toString(36).substring(2, 10).toUpperCase();
-            statusNfse = result.status;
-            successMessage = result.mensagem;
-          }
-        }
-      } catch (adapterErr: any) {
-        res.status(400).json({ error: `${prefeitura}: ${adapterErr.message}` });
-        return;
-      }
-
-      // Update company's latest RPS counter
-      db.prepare(`
-        UPDATE companies SET 
-          ultimo_rps_numero = MAX(COALESCE(ultimo_rps_numero, 0), ?),
-          updated_at = datetime('now')
-        WHERE id = ?
-      `).run(nextRpsNum, company_id);
-
-      db.prepare(`
-        INSERT INTO nfse_issued (
-          id, company_id, prefeitura, numero_nfse, codigo_verificacao,
-          prestador_cnpj, tomador_cnpj, tomador_nome, valor_servicos,
-          aliquota_iss, valor_iss, discriminacao_servico, status,
-          pdf_url, whatsapp_phone, numero_rps, serie_rps, issued_at
-        ) VALUES (
-          ?, ?, ?, ?, ?,
-          ?, ?, ?, ?,
-          ?, ?, ?, ?,
-          ?, ?, ?, ?, ?
-        )
-      `).run(
-        newId,
-        company_id,
+      const emissionResult = await processNfseEmissionCore({
+        company,
         prefeitura,
-        numeroNfse,
-        codigoVerificacao,
-        company.cnpj,
-        tomador_cnpj.replace(/\D/g, ''),
-        tomador_nome.trim(),
-        Number(valor_servicos),
-        aliquota,
-        valorIss,
-        discriminacao_servico.trim(),
-        statusNfse,
-        `/api/portal/nfse/${newId}/pdf`,
-        whatsapp_phone || null,
-        String(nextRpsNum),
-        chosenSerieRps,
-        nowIso
-      );
-
-      // Salva o XML emitido e gera o DANFSe em PDF oficial
-      const now = new Date();
-      const anoStr = String(now.getFullYear());
-      const mesStr = `${String(now.getMonth() + 1).padStart(2, '0')}.${anoStr}`;
-      const exportDir = path.resolve(__dirname, `../../storage/exports/nfse/${company.cnpj}/${anoStr}/${mesStr}`);
-      if (!fs.existsSync(exportDir)) {
-        fs.mkdirSync(exportDir, { recursive: true });
-      }
-
-      const numPad8 = String(numeroNfse || nextRpsNum).padStart(8, '0');
-      const xmlPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.xml`);
-      const pdfPath = path.join(exportDir, `NFSe_${numPad8}_${mesStr}.pdf`);
-
-      if (adapterResultXml) {
-        try { fs.writeFileSync(xmlPath, adapterResultXml, 'utf8'); } catch (_) {}
-      }
-
-      try {
-        await nfsePdfGenerator.generateDanfsePdf({
-          numero: String(numeroNfse || nextRpsNum),
-          codigoVerificacao,
-          dataEmissao: new Date().toLocaleString('pt-BR'),
-          prestadorNome: company.razao_social,
-          prestadorCnpj: company.cnpj,
-          prestadorCga: company.inscricao_municipal || (company.cnpj === '11156091000175' ? '0102932500147' : '72516200143'),
-          prestadorMunicipio: 'Salvador',
-          prestadorUf: company.uf || 'BA',
-          prestadorEmail: company.email,
-          tomadorNome: tomador_nome.trim(),
-          tomadorDoc: tomador_cnpj.replace(/\D/g, ''),
-          tomadorMunicipio: 'Salvador',
-          tomadorUf: 'BA',
-          valorServicos: Number(valor_servicos),
-          aliquota,
-          valorIss,
-          issRetido: !!iss_retido,
-          discriminacao: discriminacao_servico.trim(),
-          itemServico: item_servico || company.item_servico_padrao || '17.19',
-          cnae: company.cnae_padrao || '6920601',
-          isCancelada: false
-        }, pdfPath);
-      } catch (pdfErr) {
-        console.warn('Aviso geração DANFSe PDF pós-emissão:', pdfErr);
-      }
-
-      // Inserção na tabela invoices para visualização imediata no Dashboard
-      const chaveAcesso = `NFSE${company.cnpj}${numPad8}`;
-      const invId = uuidv4();
-      try {
-        db.prepare(`
-          INSERT OR REPLACE INTO invoices (
-            id, company_id, chave_acesso, numero, serie, modelo, tipo, status,
-            natureza_operacao, data_emissao, emitente_cnpj, emitente_nome, emitente_uf,
-            destinatario_cnpj, destinatario_nome, destinatario_uf, valor_total, valor_produtos,
-            xml_file_path, pdf_file_path, created_at
-          ) VALUES (
-            ?, ?, ?, ?, ?, 'NFS-e', '1', 'autorizada',
-            'Prestação de Serviços', ?, ?, ?, ?,
-            ?, ?, 'BA', ?, ?,
-            ?, ?, ?
-          )
-        `).run(
-          invId,
-          company.id,
-          chaveAcesso,
-          String(numeroNfse || nextRpsNum),
-          chosenSerieRps,
-          nowIso,
-          company.cnpj,
-          company.razao_social,
-          company.uf || 'BA',
-          tomador_cnpj.replace(/\D/g, ''),
-          tomador_nome.trim(),
-          Number(valor_servicos),
-          Number(valor_servicos),
-          fs.existsSync(xmlPath) ? xmlPath : null,
-          fs.existsSync(pdfPath) ? pdfPath : null,
-          nowIso
-        );
-      } catch (errInv: any) {
-        console.warn('Aviso inserção invoices:', errInv.message);
-      }
+        tomador_cnpj,
+        tomador_nome,
+        valor_servicos: Number(valor_servicos),
+        aliquota_iss: aliquota_iss ? Number(aliquota_iss) : undefined,
+        discriminacao_servico,
+        whatsapp_phone,
+        iss_retido,
+        item_servico,
+        numero_rps,
+        serie_rps,
+        provedor,
+        focus_nfe_token,
+        ambiente,
+        senha_prefeitura,
+        cnae
+      });
 
       res.status(201).json({
-        message: successMessage,
+        message: emissionResult.successMessage,
         data: {
-          id: newId,
-          numeroNfse,
-          numeroRps: String(nextRpsNum),
-          serieRps: chosenSerieRps,
-          codigoVerificacao,
-          prefeitura,
-          valorTotal: Number(valor_servicos),
-          valorIss,
-          issRetido: !!iss_retido,
+          id: emissionResult.id,
+          numeroNfse: emissionResult.numeroNfse,
+          numeroRps: emissionResult.numeroRps,
+          serieRps: emissionResult.serieRps,
+          codigoVerificacao: emissionResult.codigoVerificacao,
+          prefeitura: emissionResult.prefeitura,
+          valorTotal: emissionResult.valorTotal,
+          valorIss: emissionResult.valorIss,
+          issRetido: emissionResult.issRetido,
           whatsappSent: !!whatsapp_phone,
         }
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(400).json({ error: err.message });
     }
   },
 
@@ -663,29 +748,69 @@ export const nfseController = {
   },
 
   /**
-   * n8n / ZapCont WhatsApp Webhook Endpoint (Auto-Match & Missing Info Prompt)
+   * n8n / ZapCont WhatsApp Webhook Endpoint (Auto-Match, Pure Commerce Check & Real Emission)
    */
   async handleWhatsappWebhook(req: Request, res: Response): Promise<void> {
     try {
-      const { phone, message, tomador_cnpj, tomador_nome, valor, servico, company_cnpj, prefeitura } = req.body;
+      const { 
+        phone, 
+        message, 
+        tomador_cnpj, 
+        tomador_nome, 
+        valor, 
+        servico, 
+        company_cnpj, 
+        prefeitura,
+        numero_rps,
+        serie_rps
+      } = req.body;
 
       if (!phone) {
-        res.status(400).json({ error: 'Telefone do WhatsApp é obrigatório no webhook.' });
+        res.status(400).json({ 
+          status: 'error',
+          error: 'Telefone do WhatsApp é obrigatório no webhook.' 
+        });
         return;
       }
 
       // 1. Localiza a empresa prestadora
-      let company = db.prepare('SELECT * FROM companies WHERE cnpj = ?').get(company_cnpj) as any;
+      let company: any = null;
+      if (company_cnpj) {
+        const cleanCnpj = company_cnpj.replace(/\D/g, '');
+        company = db.prepare('SELECT * FROM companies WHERE cnpj = ?').get(cleanCnpj) as any;
+      }
+      if (!company) {
+        // Tenta Viacont ou a primeira empresa habilitada para emitir NFS-e
+        company = db.prepare(`
+          SELECT * FROM companies 
+          WHERE cnpj = '11156091000175' OR emite_nfse = 1 
+          ORDER BY (CASE WHEN cnpj = '11156091000175' THEN 0 ELSE 1 END), emite_nfse DESC 
+          LIMIT 1
+        `).get() as any;
+      }
       if (!company) {
         company = db.prepare('SELECT * FROM companies LIMIT 1').get() as any;
       }
 
       if (!company) {
-        res.status(404).json({ error: 'Nenhuma empresa cadastrada no sistema.' });
+        res.status(404).json({ 
+          status: 'error',
+          error: 'Nenhuma empresa cadastrada no sistema.' 
+        });
         return;
       }
 
-      // 2. Busca se o Tomador é um cliente recorrente cadastrado
+      // 2. 🛡️ Bloqueio para Empresas de Comércio Puro (não emissoras de NFS-e)
+      if (company.emite_nfse === 0 || company.emite_nfse === false || company.emite_nfse === '0') {
+        res.status(400).json({
+          status: 'error',
+          error: `A empresa "${company.razao_social}" está cadastrada como Comércio Puro (não emissora de NFS-e). Emissão bloqueada.`,
+          whatsappResponseText: `⚠️ *Emissão Não Permitida*\n\nA empresa *${company.razao_social}* está cadastrada como *Comércio Puro* (não emissora de NFS-e). Para emitir notas de serviço, habilite a emissão no cadastro da empresa no ViaNFe.`
+        });
+        return;
+      }
+
+      // 3. Busca se o Tomador é um cliente recorrente cadastrado
       let recurringTomador: any = null;
       if (tomador_cnpj) {
         const cleanDoc = tomador_cnpj.replace(/\D/g, '');
@@ -698,16 +823,17 @@ export const nfseController = {
       const finalTomadorCnpj = recurringTomador?.cnpj_cpf || (tomador_cnpj ? tomador_cnpj.replace(/\D/g, '') : '');
       const finalTomadorNome = recurringTomador?.razao_social || tomador_nome || '';
       const finalValor = valor ? Number(valor) : (recurringTomador?.valor_padrao || 0);
-      const finalServico = servico || recurringTomador?.discriminacao_padrao || message || 'Serviços prestados';
+      const finalServico = servico || recurringTomador?.discriminacao_padrao || message || 'Serviços contábeis e assessoria fiscal';
       const aliquotaIss = recurringTomador?.aliquota_iss || company.nfse_aliquota_padrao || 5.0;
-      const issRetido = recurringTomador?.iss_retido || company.nfse_iss_retido_padrao || 0;
+      const issRetido = recurringTomador?.iss_retido !== undefined ? recurringTomador.iss_retido : (company.nfse_iss_retido_padrao || 0);
+      const pref = prefeitura || company.nfse_prefeitura_padrao || 'Salvador';
 
-      // 3. Validação Interativa: Se faltam dados cruciais, devolve pergunta para o ZapCont
+      // 4. Validação Interativa: Se faltam dados cruciais, devolve pergunta para o ZapCont
       if (!finalTomadorCnpj || finalTomadorCnpj.length < 11) {
         res.json({
           status: 'missing_info',
           missingField: 'cnpj_cpf',
-          whatsappResponseText: `🤖 *Assistente Fiscal Viacont*\n\nPara emitir sua NFS-e, por favor informe o *CNPJ ou CPF* do tomador do serviço.`
+          whatsappResponseText: `🤖 *Assistente Fiscal Viacont*\n\nPara emitir sua NFS-e pela *${company.razao_social}*, por favor informe o *CNPJ ou CPF* do tomador do serviço.`
         });
         return;
       }
@@ -722,66 +848,54 @@ export const nfseController = {
         return;
       }
 
-      // 4. Todos os dados validados -> Emite a NFS-e
-      const pref = prefeitura || company.nfse_prefeitura_padrao || 'Salvador';
-      const year = new Date().getFullYear();
-      const numeroNfse = `${year}${Math.floor(10000 + Math.random() * 90000)}`;
-      const codigoVerificacao = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const newId = uuidv4();
-      const nowIso = new Date().toISOString();
-      const valorIss = (finalValor * aliquotaIss) / 100;
+      // 5. Executa emissão real e oficial através do pipeline completo (SalvadorNfseAdapter / Focus NFe)
+      const emissionResult = await processNfseEmissionCore({
+        company,
+        prefeitura: pref,
+        tomador_cnpj: finalTomadorCnpj,
+        tomador_nome: finalTomadorNome || 'Cliente Tomador',
+        valor_servicos: finalValor,
+        aliquota_iss: aliquotaIss,
+        discriminacao_servico: finalServico,
+        whatsapp_phone: phone,
+        iss_retido: !!issRetido,
+        item_servico: recurringTomador?.item_servico || company.item_servico_padrao || '17.01',
+        numero_rps,
+        serie_rps
+      });
 
-      db.prepare(`
-        INSERT INTO nfse_issued (
-          id, company_id, prefeitura, numero_nfse, codigo_verificacao,
-          prestador_cnpj, tomador_cnpj, tomador_nome, valor_servicos,
-          aliquota_iss, valor_iss, discriminacao_servico, status,
-          pdf_url, whatsapp_phone, issued_at
-        ) VALUES (
-          ?, ?, ?, ?, ?,
-          ?, ?, ?, ?,
-          ?, ?, ?, 'emitida',
-          ?, ?, ?
-        )
-      `).run(
-        newId,
-        company.id,
-        pref,
-        numeroNfse,
-        codigoVerificacao,
-        company.cnpj,
-        finalTomadorCnpj,
-        finalTomadorNome || 'Cliente Tomador',
-        finalValor,
-        aliquotaIss,
-        valorIss,
-        finalServico,
-        `/api/portal/nfse/${newId}/pdf`,
-        phone,
-        nowIso
-      );
-
-      const pdfUrl = `https://vianfe.contadordev.com.br/api/portal/nfse/${newId}/pdf`;
-      const xmlUrl = `https://vianfe.contadordev.com.br/api/portal/nfse/${newId}/xml`;
+      const host = req.get('host') || 'vianfe.contadordev.com.br';
+      const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const pdfDownloadUrl = `${baseUrl}/api/portal/nfse/${emissionResult.id}/pdf`;
+      const xmlDownloadUrl = `${baseUrl}/api/portal/nfse/${emissionResult.id}/xml`;
 
       res.json({
         status: 'success',
-        message: 'NFS-e gerada via comando do WhatsApp com sucesso!',
-        whatsappResponseText: `✅ *NFS-e Emitida com Sucesso!*\n\n🏛️ *Prefeitura:* ${pref}\n📄 *Número da Nota:* ${numeroNfse}\n🔐 *Cód. Verificação:* ${codigoVerificacao}\n👤 *Tomador:* ${finalTomadorNome || finalTomadorCnpj}\n💰 *Valor Total:* R$ ${finalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n🛡️ *ISS:* ${issRetido ? 'RETIDO NA FONTE' : `R$ ${valorIss.toFixed(2)} (${aliquotaIss}%)`}\n📝 *Discriminação:* ${finalServico}\n\n📎 *O PDF do DANFSe está anexado acima nesta mensagem!*\n\n💾 *Download do XML Oficial da NFS-e (Nº ${numeroNfse}):*\n👉 ${xmlUrl}\n_(Clique no link acima para baixar o arquivo XML oficial desta NFS-e)_\n\n_Emitido automaticamente via ZapCont & Viacont Fiscal._`,
+        message: emissionResult.successMessage,
+        whatsappResponseText: `✅ *NFS-e Emitida com Sucesso!*\n\n🏛️ *Prefeitura:* ${emissionResult.prefeitura}\n📄 *Número da Nota:* ${emissionResult.numeroNfse}\n🔢 *RPS:* Nº ${emissionResult.numeroRps} (Série ${emissionResult.serieRps})\n🔐 *Cód. Verificação:* ${emissionResult.codigoVerificacao}\n👤 *Tomador:* ${finalTomadorNome || finalTomadorCnpj}\n💰 *Valor Total:* R$ ${finalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n🛡️ *ISS:* ${issRetido ? 'RETIDO NA FONTE' : `R$ ${emissionResult.valorIss.toFixed(2)} (${aliquotaIss}%)`}\n📝 *Discriminação:* ${finalServico}\n\n📎 *O PDF oficial (DANFSe) está disponível para download e visualização!*\n👉 *PDF:* ${pdfDownloadUrl}\n💾 *XML Oficial:* ${xmlDownloadUrl}\n\n_Emitido automaticamente via ZapCont & Viacont Fiscal._`,
         data: {
-          id: newId,
-          numeroNfse,
-          codigoVerificacao,
-          pdfUrl,
-          xmlUrl,
-          mediaUrl: pdfUrl,
+          id: emissionResult.id,
+          numeroNfse: emissionResult.numeroNfse,
+          numeroRps: emissionResult.numeroRps,
+          serieRps: emissionResult.serieRps,
+          codigoVerificacao: emissionResult.codigoVerificacao,
+          prefeitura: emissionResult.prefeitura,
+          pdfUrl: pdfDownloadUrl,
+          xmlUrl: xmlDownloadUrl,
+          mediaUrl: pdfDownloadUrl,
           mediaType: 'application/pdf',
-          fileName: `DANFSE_${numeroNfse}.pdf`,
-          xmlFileName: `NFSE_${numeroNfse}.xml`
+          fileName: `DANFSE_${emissionResult.numeroNfse}.pdf`,
+          xmlFileName: `NFSE_${emissionResult.numeroNfse}.xml`
         }
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('❌ [WhatsApp Webhook NFS-e] Erro:', err.message);
+      res.status(400).json({ 
+        status: 'error',
+        error: err.message,
+        whatsappResponseText: `❌ *Falha na Emissão da NFS-e*\n\nNão foi possível emitir a nota fiscal.\n*Motivo:* ${err.message}\n\nPor favor revise as informações ou tente novamente.`
+      });
     }
   },
 
