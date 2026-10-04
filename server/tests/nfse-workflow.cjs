@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const wf=require('../../integrations/n8n/nfse-emission.json');
+const normal=wf.nodes.find(n=>n.name==='Normalizar Parametros').parameters.jsCode;
+const run=p=>vm.runInNewContext('(function(){'+normal+'})()',{ $input:{item:{json:{body:p}}}})[0].json;
+assert.throws(()=>run({valor:'1.000,00'}));
+const empty=run({});assert.equal(empty.company_cnpj,'');assert.equal(empty.servico,'');assert.equal(empty.prefeitura,undefined);
+assert.equal(run({valor:100,company_cnpj:'12.3'}).valor,100);
+assert(!wf.nodes.some(n=>JSON.stringify(n.parameters).includes('/v1/messages')));
+const format=wf.nodes.find(n=>n.name==='Formatar Resposta').parameters.jsCode;
+const result=vm.runInNewContext('(function(){'+format+'})()',{ $input:{item:{json:{}}}})[0].json;
+assert.equal(result.status,'unknown');assert.equal(result.customer_message_sent,false);
+assert(wf.nodes.find(n=>n.name==='Chamar ViaNFe Emissor Oficial').parameters.headerParameters.parameters.some(p=>p.name==='Authorization'));
+console.log('PASS: no invented issuer/service/city; invalid currency rejected; no direct customer send; no assumed success; auth forwarded.');

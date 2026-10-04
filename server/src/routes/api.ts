@@ -1,3 +1,4 @@
+import { nfseAccess } from '../middleware/nfseAccess.js';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -97,16 +98,16 @@ router.post('/portal/manifest', verifyJwtAndTenant, manifestacaoController.submi
 router.get('/portal/manifestations/:invoiceId', verifyJwtAndTenant, manifestacaoController.getManifestations);
 
 // NFS-e Prefeituras & WhatsApp n8n Webhook Routes
-router.get('/portal/nfse', verifyJwtAndTenant, nfseController.getNfseList);
-router.post('/portal/nfse/emit', verifyJwtAndTenant, nfseController.emitNfse);
-router.delete('/portal/nfse/:id', verifyJwtAndTenant, nfseController.deleteNfse);
-router.get('/portal/nfse/:id/pdf', nfseController.getPdf);
-router.get('/portal/nfse/:id/xml', nfseController.getXml);
-router.get('/portal/nfse/clients', verifyJwtAndTenant, nfseController.getRecurringClients);
-router.post('/portal/nfse/clients', verifyJwtAndTenant, nfseController.saveRecurringClient);
-router.delete('/portal/nfse/clients/:id', verifyJwtAndTenant, nfseController.deleteRecurringClient);
-router.get('/portal/nfse/focus-config', verifyJwtAndTenant, nfseController.getFocusNfeConfig);
-router.post('/portal/nfse/webhook-whatsapp', nfseController.handleWhatsappWebhook); // Webhook integration
+router.get('/portal/nfse', verifyJwtAndTenant, nfseAccess, nfseController.getNfseList);
+router.post('/portal/nfse/emit', verifyJwtAndTenant, nfseAccess, nfseController.emitNfse);
+router.delete('/portal/nfse/:id', verifyJwtAndTenant, nfseAccess, nfseController.deleteNfse);
+router.get('/portal/nfse/:id/pdf', verifyJwtAndTenant, nfseAccess, nfseController.getPdf);
+router.get('/portal/nfse/:id/xml', verifyJwtAndTenant, nfseAccess, nfseController.getXml);
+router.get('/portal/nfse/clients', verifyJwtAndTenant, nfseAccess, nfseController.getRecurringClients);
+router.post('/portal/nfse/clients', verifyJwtAndTenant, nfseAccess, nfseController.saveRecurringClient);
+router.delete('/portal/nfse/clients/:id', verifyJwtAndTenant, nfseAccess, nfseController.deleteRecurringClient);
+router.get('/portal/nfse/focus-config', verifyJwtAndTenant, nfseAccess, nfseController.getFocusNfeConfig);
+router.post('/portal/nfse/webhook-whatsapp', verifyJwtAndTenant, nfseAccess, nfseController.handleWhatsappWebhook); // Webhook integration
 
 // Módulo Oficial NFS-e Salvador / Nacional ADN - Auditoria e Fechamento Mensal
 router.post('/nfse/monthly-sync', verifyJwtAndTenant, nfseController.syncMonthlyNfse);

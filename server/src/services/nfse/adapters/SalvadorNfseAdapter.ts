@@ -1,7 +1,7 @@
 import https from 'https';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import { officialNfse } from '../emissionSafety.js';
 import forge from 'node-forge';
 // @ts-ignore
 import { SignedXml } from 'xml-crypto';
@@ -39,7 +39,7 @@ export class SalvadorNfseAdapter implements INfseAdapter {
       key: certInfo.keyPem,
       minVersion: 'TLSv1.2',
       maxVersion: 'TLSv1.3',
-      rejectUnauthorized: false
+      rejectUnauthorized: true
     });
   }
 
@@ -92,26 +92,11 @@ export class SalvadorNfseAdapter implements INfseAdapter {
       }
     }
 
-    // Fallback: se o subject não bater pelo CNPJ exato, pega o primeiro certificado com chave privada
-    if (!leafCert) {
-      for (const sc of pfx.safeContents) {
-        for (const sb of sc.safeBags) {
-          if (sb.cert) {
-            leafCert = sb.cert;
-            certPem = forge.pki.certificateToPem(sb.cert);
-            subject = sb.cert.subject.attributes.map((a: any) => `${a.shortName || a.name}=${a.value}`).join(' ');
-            validUntil = sb.cert.validity.notAfter;
-            break;
-          }
-        }
-        if (leafCert) break;
-      }
-    }
-
     if (!keyPem || !leafCert) {
       throw new Error('Chave privada ou certificado público não encontrados no arquivo .pfx');
     }
 
+    if (validUntil.getTime() < Date.now() || leafCert.validity.notBefore.getTime() > Date.now()) throw new Error('Certificado fora da validade.');
     const leafCertBase64 = forge.util.encode64(forge.asn1.toDer(forge.pki.certificateToAsn1(leafCert)).getBytes());
 
     return { certPem, keyPem, fullChainPem, leafCertBase64, subject, validUntil };
@@ -124,9 +109,7 @@ export class SalvadorNfseAdapter implements INfseAdapter {
   public buildSignedXml(payload: NfseEmissionPayload, certInfo: CertificateInfo): { signedXml: string; rpsId: string; loteId: string } {
     const prestadorCnpj = cleanNumeric(payload.company.cnpj || '');
     let prestadorIm = cleanNumeric(payload.company.inscricao_municipal || '');
-    if (prestadorCnpj === '11156091000175' && (!prestadorIm || prestadorIm.length < 8)) {
-      prestadorIm = '0102932500147';
-    }
+
 
     const cleanTomadorDoc = cleanNumeric(payload.tomadorCnpjCpf || '');
     const isCpf = cleanTomadorDoc.length === 11;
@@ -134,7 +117,7 @@ export class SalvadorNfseAdapter implements INfseAdapter {
     const dataEmissao = payload.dataEmissaoRps || nowIso;
 
     const valorServicos = Number(payload.valorServicos || 0);
-    const aliquotaNum = Number(payload.aliquotaIss || 5.0);
+    const aliquotaNum = Number(payload.aliquotaIss ?? 0);
     const valorIss = Number(payload.valorIss || (valorServicos * aliquotaNum) / 100).toFixed(2);
 
     const rpsId = `RPS_${payload.numeroRps}`;
@@ -142,26 +125,26 @@ export class SalvadorNfseAdapter implements INfseAdapter {
     const serieRps = payload.serieRps || '1';
 
     // Item de serviço formatado para Salvador (apenas dígitos, ex: 1719, 1701)
-    const rawItem = (payload.itemServico || payload.company.item_servico_padrao || '17.19').trim();
-    const itemListaDigitos = rawItem.replace(/\D/g, '') || '1719';
-    const cnae = cleanNumeric(payload.cnae || payload.company.cnae_padrao || '6920601');
-    const codTribMunicipio = (payload.codigoTributacaoMunicipio || payload.company.codigo_tributacao_municipio || `${itemListaDigitos}001`).replace(/\D/g, '');
+    const rawItem = (payload.itemServico || payload.company.item_servico_padrao || '').trim();
+    const itemListaDigitos = rawItem.replace(/\D/g, '') || '';
+    const cnae = cleanNumeric(payload.cnae || payload.company.cnae_padrao || '');
+    const codTribMunicipio = (payload.codigoTributacaoMunicipio || payload.company.codigo_tributacao_municipio || '').replace(/\D/g, '');
 
-    const discriminacao = (payload.discriminacao || 'Serviços contábeis e assessoria fiscal.')
+    const discriminacao = (payload.discriminacao || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
 
-    const tomadorNome = (payload.tomadorNome || 'TOMADOR DE SERVIÇOS')
+    const tomadorNome = (payload.tomadorNome || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
 
-    const xmlBase = `<EnviarLoteRpsEnvio xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd"><LoteRps id="${loteId}"><NumeroLote>${payload.numeroRps}</NumeroLote><Cnpj>${prestadorCnpj}</Cnpj><InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal><QuantidadeRps>1</QuantidadeRps><ListaRps><Rps><InfRps id="${rpsId}"><IdentificacaoRps><Numero>${payload.numeroRps}</Numero><Serie>${serieRps}</Serie><Tipo>${payload.tipoRps || '1'}</Tipo></IdentificacaoRps><DataEmissao>${dataEmissao}</DataEmissao><NaturezaOperacao>${payload.naturezaOperacao || '1'}</NaturezaOperacao><OptanteSimplesNacional>${payload.optanteSimplesNacional || '1'}</OptanteSimplesNacional><IncentivadorCultural>${payload.incentivadorCultural || '2'}</IncentivadorCultural><Status>1</Status><Servico><Valores><ValorServicos>${valorServicos.toFixed(2)}</ValorServicos><ValorDeducoes>0.00</ValorDeducoes><ValorPis>0.00</ValorPis><ValorCofins>0.00</ValorCofins><ValorInss>0.00</ValorInss><ValorIr>0.00</ValorIr><ValorCsll>0.00</ValorCsll><IssRetido>${payload.issRetido ? '1' : '2'}</IssRetido><ValorIss>${valorIss}</ValorIss><OutrasRetencoes>0.00</OutrasRetencoes><BaseCalculo>${valorServicos.toFixed(2)}</BaseCalculo><Aliquota>${(aliquotaNum / 100).toFixed(2)}</Aliquota><ValorLiquidoNfse>${valorServicos.toFixed(2)}</ValorLiquidoNfse><DescontoIncondicionado>0.00</DescontoIncondicionado><DescontoCondicionado>0.00</DescontoCondicionado></Valores><ItemListaServico>${itemListaDigitos}</ItemListaServico><CodigoCnae>${cnae}</CodigoCnae><CodigoTributacaoMunicipio>${codTribMunicipio}</CodigoTributacaoMunicipio><Discriminacao>${discriminacao}</Discriminacao><CodigoMunicipio>2927408</CodigoMunicipio><NBS>113022100</NBS><cClassTrib></cClassTrib><INDOP></INDOP></Servico><Prestador><Cnpj>${prestadorCnpj}</Cnpj><InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal></Prestador><Tomador><IdentificacaoTomador><CpfCnpj>${isCpf ? `<Cpf>${cleanTomadorDoc}</Cpf>` : `<Cnpj>${cleanTomadorDoc}</Cnpj>`}</CpfCnpj></IdentificacaoTomador><RazaoSocial>${tomadorNome}</RazaoSocial></Tomador></InfRps></Rps></ListaRps></LoteRps></EnviarLoteRpsEnvio>`;
+    const xmlBase = `<EnviarLoteRpsEnvio xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd"><LoteRps id="${loteId}"><NumeroLote>${payload.numeroRps}</NumeroLote><Cnpj>${prestadorCnpj}</Cnpj><InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal><QuantidadeRps>1</QuantidadeRps><ListaRps><Rps><InfRps id="${rpsId}"><IdentificacaoRps><Numero>${payload.numeroRps}</Numero><Serie>${serieRps}</Serie><Tipo>${payload.tipoRps || '1'}</Tipo></IdentificacaoRps><DataEmissao>${dataEmissao}</DataEmissao><NaturezaOperacao>${payload.naturezaOperacao || '1'}</NaturezaOperacao><OptanteSimplesNacional>${payload.optanteSimplesNacional || '1'}</OptanteSimplesNacional><IncentivadorCultural>${payload.incentivadorCultural || '2'}</IncentivadorCultural><Status>1</Status><Servico><Valores><ValorServicos>${valorServicos.toFixed(2)}</ValorServicos><ValorDeducoes>0.00</ValorDeducoes><ValorPis>0.00</ValorPis><ValorCofins>0.00</ValorCofins><ValorInss>0.00</ValorInss><ValorIr>0.00</ValorIr><ValorCsll>0.00</ValorCsll><IssRetido>${payload.issRetido ? '1' : '2'}</IssRetido><ValorIss>${valorIss}</ValorIss><OutrasRetencoes>0.00</OutrasRetencoes><BaseCalculo>${valorServicos.toFixed(2)}</BaseCalculo><Aliquota>${(aliquotaNum / 100).toFixed(4)}</Aliquota><ValorLiquidoNfse>${valorServicos.toFixed(2)}</ValorLiquidoNfse><DescontoIncondicionado>0.00</DescontoIncondicionado><DescontoCondicionado>0.00</DescontoCondicionado></Valores><ItemListaServico>${itemListaDigitos}</ItemListaServico><CodigoCnae>${cnae}</CodigoCnae><CodigoTributacaoMunicipio>${codTribMunicipio}</CodigoTributacaoMunicipio><Discriminacao>${discriminacao}</Discriminacao><CodigoMunicipio>2927408</CodigoMunicipio><cClassTrib></cClassTrib><INDOP></INDOP></Servico><Prestador><Cnpj>${prestadorCnpj}</Cnpj><InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal></Prestador><Tomador><IdentificacaoTomador><CpfCnpj>${isCpf ? `<Cpf>${cleanTomadorDoc}</Cpf>` : `<Cnpj>${cleanTomadorDoc}</Cnpj>`}</CpfCnpj></IdentificacaoTomador><RazaoSocial>${tomadorNome}</RazaoSocial></Tomador></InfRps></Rps></ListaRps></LoteRps></EnviarLoteRpsEnvio>`;
 
     // 1. Assinatura do InfRps
     const sigRps = new SignedXml();
@@ -254,36 +237,15 @@ export class SalvadorNfseAdapter implements INfseAdapter {
       throw new Error(`SEFAZ Salvador: ${erroMsg.trim()}${correcao}`);
     }
 
-    let numeroNfse = `${new Date().getFullYear()}${payload.numeroRps}`;
-    let codigoVerificacao = crypto.randomBytes(4).toString('hex').toUpperCase();
-
-    // Consulta assíncrona por RPS para obter Número oficial e Código de Verificação real
-    try {
-      await new Promise(r => setTimeout(r, 1500));
-      const consultRes = await this.consultarNfsePorRps(payload.company, payload.numeroRps, payload.serieRps || '1', certInfo);
-      if (consultRes && consultRes.numeroNfse) {
-        numeroNfse = consultRes.numeroNfse;
-        codigoVerificacao = consultRes.codigoVerificacao || codigoVerificacao;
-      }
-    } catch (consultErr: any) {
-      console.log('ℹ️ [Salvador] Consulta imediata pós-lote aguardando processamento:', consultErr.message);
-    }
-
+    let document: {numeroNfse?:string;codigoVerificacao?:string;xml?:string}|null=null;
+    try { document=await this.consultarNfsePorRps(payload.company,payload.numeroRps,payload.serieRps,certInfo); } catch (_) { /* Ambiguous transmission stays pending; never retry emission. */ }
     return {
-      success: true,
-      status: 'autorizada',
-      numeroNfse,
-      numeroRps: payload.numeroRps,
-      serieRps: payload.serieRps || '1',
-      protocolo,
-      codigoVerificacao,
-      dataEmissao: new Date().toISOString(),
-      linkVisualizacao: `${wsUrl}/site/consulta/consigna.aspx`,
-      mensagem: protocolo
-        ? `Lote RPS Nº ${payload.numeroRps} autorizado pela Prefeitura de Salvador! Protocolo: ${protocolo} (Nota Nº ${numeroNfse})`
-        : `Lote RPS Nº ${payload.numeroRps} emitido com sucesso na Prefeitura de Salvador!`,
-      xmlEnviado: signedXml,
-      xmlRetorno: responseText
+      success:true,status:document?.numeroNfse ? 'autorizada':'processando',
+      numeroNfse:document?.numeroNfse,codigoVerificacao:document?.codigoVerificacao,
+      numeroRps:payload.numeroRps,serieRps:payload.serieRps || '1',protocolo,
+      dataEmissao:new Date().toISOString(),
+      mensagem:document?.numeroNfse ? 'NFS-e autorizada com XML oficial.' : 'RPS enviado; autorização ainda não confirmada. Não retransmitir.',
+      xmlEnviado:signedXml,xmlRetorno:document?.xml || responseText
     };
   }
 
@@ -297,9 +259,7 @@ export class SalvadorNfseAdapter implements INfseAdapter {
 
     const prestadorCnpj = cleanNumeric(company.cnpj || '');
     let prestadorIm = cleanNumeric(company.inscricao_municipal || '');
-    if (prestadorCnpj === '11156091000175' && (!prestadorIm || prestadorIm.length < 8)) {
-      prestadorIm = '0102932500147';
-    }
+
 
     const xml = `<ConsultarNfseRpsEnvio xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd"><IdentificacaoRps><Numero>${numeroRps}</Numero><Serie>${serieRps}</Serie><Tipo>1</Tipo></IdentificacaoRps><Prestador><Cnpj>${prestadorCnpj}</Cnpj><InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal></Prestador></ConsultarNfseRpsEnvio>`;
     const soap = `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><ConsultarNfsePorRps xmlns="http://tempuri.org/"><consultaxml><![CDATA[${xml}]]></consultaxml></ConsultarNfsePorRps></s:Body></s:Envelope>`;
@@ -325,85 +285,19 @@ export class SalvadorNfseAdapter implements INfseAdapter {
       req.end();
     });
 
-    const numMatch = resXml.match(/<Numero>(\d+)<\/Numero>/i);
-    const codMatch = resXml.match(/<CodigoVerificacao>([A-Za-z0-9]+)<\/CodigoVerificacao>/i);
-
-    if (numMatch) {
-      return {
-        numeroNfse: numMatch[1],
-        codigoVerificacao: codMatch ? codMatch[1] : undefined,
-        xml: resXml
-      };
-    }
-    return null;
+    try {
+      const note=officialNfse(resXml,{cnpj:prestadorCnpj});
+      return {numeroNfse:note.numero,codigoVerificacao:note.codigo,xml:resXml};
+    } catch (_) { return null; }
   }
 
-  /**
-   * Consulta a Situação do Lote RPS na SEFAZ Salvador via WebService mTLS
-   */
-  async consultarSituacaoLote(company: any, protocoloOuLote: string, certInfo?: CertificateInfo): Promise<any> {
-    const cert = certInfo || this.getCertInfo(company);
-    const agent = this.createHttpsAgent(cert);
-    const wsUrl = this.getWsUrl(company.sefaz_ambiente);
-
-    const prestadorCnpj = cleanNumeric(company.cnpj || '');
-    let prestadorIm = cleanNumeric(company.inscricao_municipal || '');
-    if (prestadorCnpj === '11156091000175' && (!prestadorIm || prestadorIm.length < 8)) {
-      prestadorIm = '0102932500147';
-    }
-
-    const consultaXml = `
-      <ConsultarSituacaoLoteRpsEnvio xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd">
-        <Prestador>
-          <Cnpj>${prestadorCnpj}</Cnpj>
-          <InscricaoMunicipal>${prestadorIm}</InscricaoMunicipal>
-        </Prestador>
-        <Protocolo>${protocoloOuLote}</Protocolo>
-      </ConsultarSituacaoLoteRpsEnvio>
-    `.trim();
-
-    const soapEnvelope = `
-      <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-        <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-          <ConsultarSituacaoLoteRPS xmlns="http://tempuri.org/">
-            <consultaxml><![CDATA[${consultaXml}]]></consultaxml>
-          </ConsultarSituacaoLoteRPS>
-        </s:Body>
-      </s:Envelope>
-    `.trim();
-
-    return new Promise((resolve, reject) => {
-      const req = https.request(`${wsUrl}/rps/CONSULTASITUACAOLOTERPS/ConsultaSituacaoLoteRps.svc`, {
-        method: 'POST',
-        agent,
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': 'http://tempuri.org/IConsultaSituacaoLoteRPS/ConsultarSituacaoLoteRPS',
-          'Content-Length': Buffer.byteLength(soapEnvelope)
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => resolve({ statusCode: res.statusCode, rawXml: data }));
-      });
-      req.on('error', reject);
-      req.write(soapEnvelope);
-      req.end();
-    });
-  }
-
-  /**
-   * Consulta Lote RPS com Polling Assíncrono (Intervalos 3s, 6s, 12s)
-   */
   async consultarLoteRps(payload: NfseConsultationPayload): Promise<NfseEmissionResponse> {
     const cert = this.getCertInfo(payload.company);
     const agent = this.createHttpsAgent(cert);
     const wsUrl = this.getWsUrl(payload.company.sefaz_ambiente);
     const prestadorCnpj = cleanNumeric(payload.company.cnpj || '');
     let prestadorIm = cleanNumeric(payload.company.inscricao_municipal || '');
-    if (prestadorCnpj === '11156091000175' && (!prestadorIm || prestadorIm.length < 8)) {
-      prestadorIm = '0102932500147';
-    }
+
 
     const consultaLoteXml = `
       <ConsultarLoteRpsEnvio xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd">
@@ -461,7 +355,7 @@ export class SalvadorNfseAdapter implements INfseAdapter {
 
     return {
       success: true,
-      status: 'autorizada',
+      status: 'processando',
       numeroRps: payload.numeroRps || '1',
       serieRps: payload.serieRps || '1',
       dataEmissao: new Date().toISOString(),

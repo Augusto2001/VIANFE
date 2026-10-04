@@ -73,7 +73,8 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const [tomadorNome, setTomadorNome] = useState('');
   const [tomadorEndereco, setTomadorEndereco] = useState('');
   const [valorServicos, setValorServicos] = useState('');
-  const [aliquotaIss, setAliquotaIss] = useState('5.0');
+  const [aliquotaIss, setAliquotaIss] = useState('');
+  const [optanteSimples, setOptanteSimples] = useState('');
   const [issRetido, setIssRetido] = useState(false);
   const [discriminacaoServico, setDiscriminacaoServico] = useState('');
   const [whatsappPhone, setWhatsappPhone] = useState('');
@@ -130,7 +131,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
       setCaptchaKey(key || '');
       setFocusToken(focusCfg?.focus_nfe_token || '');
       setNfseProvedor(focusCfg?.nfse_provedor || 'focus_nfe');
-      setNumeroRps(String((selectedCompany.ultimo_rps_numero || 358) + 1));
+      setNumeroRps(String((selectedCompany.ultimo_rps_numero || 0) + 1));
     } catch (err) {
       console.error('Error loading NFS-e data:', err);
     } finally {
@@ -240,7 +241,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
     const end = [client.logradouro, client.numero, client.bairro, client.municipio, client.uf].filter(Boolean).join(', ');
     setTomadorEndereco(end || '');
     setValorServicos(client.valor_padrao ? client.valor_padrao.toString() : '');
-    setAliquotaIss(client.aliquota_iss ? client.aliquota_iss.toString() : '5.0');
+    setAliquotaIss(client.aliquota_iss != null ? client.aliquota_iss.toString() : '');
     setIssRetido(client.iss_retido === 1);
     setDiscriminacaoServico(client.discriminacao_padrao || '');
     setWhatsappPhone(client.telefone_whatsapp || '');
@@ -255,7 +256,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
     }
     setError('');
 
-    if (!tomadorCnpj || !tomadorNome || !valorServicos || !discriminacaoServico) {
+    if (!tomadorCnpj || !tomadorNome || !valorServicos || !discriminacaoServico || aliquotaIss === '' || !optanteSimples) {
       setError('Por favor, preencha todos os campos obrigatórios da NFS-e.');
       return;
     }
@@ -270,6 +271,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
         tomador_nome: tomadorNome,
         valor_servicos: Number(valorServicos),
         aliquota_iss: Number(aliquotaIss),
+        optante_simples_nacional: optanteSimples,
         iss_retido: issRetido,
         discriminacao_servico: discriminacaoServico,
         whatsapp_phone: whatsappPhone || undefined,
@@ -641,7 +643,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
 
                   <div className="flex items-center gap-2">
                     <a
-                      href={`https://vianfe.contadordev.com.br/api/portal/nfse/${nfse.id}/pdf`}
+                      href={api.getNfsePdfUrl(nfse.id)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
@@ -652,7 +654,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                     </a>
 
                     <a
-                      href={`https://vianfe.contadordev.com.br/api/portal/nfse/${nfse.id}/xml`}
+                      href={api.getNfseXmlUrl(nfse.id)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
@@ -783,6 +785,11 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
             )}
 
             <form onSubmit={handleEmitNfse} className="space-y-4">
+              <label className="block">Prestador optante pelo Simples Nacional
+                <select required value={optanteSimples} onChange={e => setOptanteSimples(e.target.value)} className="w-full rounded p-2 bg-slate-800">
+                  <option value="">Selecione conforme o cadastro fiscal</option><option value="1">Sim</option><option value="2">Não</option>
+                </select>
+              </label>
               
               {/* Autofill Select from Registered Tomadores */}
               {recurringClients.length > 0 && (

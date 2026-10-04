@@ -1,0 +1,210 @@
+{
+  "name": "ZAPCONT - Emissao NFSe ViaNFe",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zapcont-emitir-nfse",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "zapcont-emitir-nfse"
+    },
+    {
+      "parameters": {},
+      "id": "sub-trigger",
+      "name": "Entrada Subworkflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i=$input.item.json; const p=i.body || i;\nconst amount=p.valor ?? p.valor_servicos;\nif(typeof amount==='string' && !/^\\d+(\\.\\d{1,2})?$/.test(amount)) throw new Error('Valor deve usar ponto decimal, sem separador de milhar.');\nreturn [{json:{phone:String(p.phone || p.telefone || '').replace(/\\D/g,''),company_cnpj:String(p.company_cnpj || p.cnpj_prestador || '').replace(/\\D/g,''),tomador_cnpj:String(p.tomador_cnpj || '').replace(/\\D/g,''),tomador_nome:String(p.tomador_nome || '').trim(),valor:amount,servico:String(p.servico || p.discriminacao || '').trim(),prefeitura:p.prefeitura,numero_rps:p.numero_rps,serie_rps:p.serie_rps,optante_simples_nacional:p.optante_simples_nacional}}];"
+      },
+      "id": "normalizar",
+      "name": "Normalizar Parametros",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vianfe.contadordev.com.br/api/portal/nfse/webhook-whatsapp",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('Webhook').isExecuted ? ($('Webhook').item.json.headers.authorization || '') : ($('Entrada Subworkflow').item.json.authorization || '') }}"
+            }
+          ]
+        }
+      },
+      "id": "call-vianfe",
+      "name": "Chamar ViaNFe Emissor Oficial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r=$input.item.json;\nreturn [{json:{status:r.status || (r.error ? 'error':'unknown'),message:r.whatsappResponseText || r.error || r.message || 'Resultado não confirmado.',data:r.data || null,requires_authenticated_download:true,customer_message_sent:false}}];"
+      },
+      "id": "formatar",
+      "name": "Formatar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "resp-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1620,
+        380
+      ]
+    },
+    {
+      "id": "nfse-entry-mode",
+      "name": "Entrada HTTP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Webhook').isExecuted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Parametros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada Subworkflow": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Parametros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Parametros": {
+      "main": [
+        [
+          {
+            "node": "Chamar ViaNFe Emissor Oficial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamar ViaNFe Emissor Oficial": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Resposta": {
+      "main": [
+        [
+          {
+            "node": "Entrada HTTP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entrada HTTP?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
+  }
+}

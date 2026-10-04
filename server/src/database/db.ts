@@ -32,6 +32,11 @@ try {
 
 // Initialize database schema
 export function initDatabase() {
+  db.exec(`CREATE TABLE IF NOT EXISTS nfse_emission_attempts (
+    request_key TEXT PRIMARY KEY, company_id TEXT NOT NULL, rps TEXT NOT NULL,
+    state TEXT NOT NULL, response_json TEXT, official_xml TEXT, created_at TEXT NOT NULL,
+    UNIQUE(company_id,rps)
+  )`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS companies (
       id TEXT PRIMARY KEY,
