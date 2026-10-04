@@ -75,6 +75,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
   const [valorServicos, setValorServicos] = useState('');
   const [aliquotaIss, setAliquotaIss] = useState('');
   const [optanteSimples, setOptanteSimples] = useState('');
+  const [operacaoPadrao, setOperacaoPadrao] = useState(false);
   const [issRetido, setIssRetido] = useState(false);
   const [discriminacaoServico, setDiscriminacaoServico] = useState('');
   const [whatsappPhone, setWhatsappPhone] = useState('');
@@ -272,6 +273,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
         valor_servicos: Number(valorServicos),
         aliquota_iss: Number(aliquotaIss),
         optante_simples_nacional: optanteSimples,
+        operacao_padrao_confirmada: operacaoPadrao,
         iss_retido: issRetido,
         discriminacao_servico: discriminacaoServico,
         whatsapp_phone: whatsappPhone || undefined,
@@ -643,18 +645,18 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
 
                   <div className="flex items-center gap-2">
                     <a
-                      href={api.getNfsePdfUrl(nfse.id)}
+                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'pdf').catch(err => alert(err.message)); }}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
-                      title="Visualizar e Baixar DANFSe Oficial em PDF"
+                      title="Baixar representação da NFS-e baseada no XML oficial"
                     >
                       <FileText className="w-3.5 h-3.5 text-indigo-400" />
                       <span>PDF</span>
                     </a>
 
                     <a
-                      href={api.getNfseXmlUrl(nfse.id)}
+                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'xml').catch(err => alert(err.message)); }}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
@@ -785,6 +787,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
             )}
 
             <form onSubmit={handleEmitNfse} className="space-y-4">
+              <label className="block"><input type="checkbox" required checked={operacaoPadrao} onChange={e => setOperacaoPadrao(e.target.checked)} /> Confirmo: serviço tributado em Salvador, sem incentivo cultural, deduções, descontos ou outras retenções além do ISS informado.</label>
               <label className="block">Prestador optante pelo Simples Nacional
                 <select required value={optanteSimples} onChange={e => setOptanteSimples(e.target.value)} className="w-full rounded p-2 bg-slate-800">
                   <option value="">Selecione conforme o cadastro fiscal</option><option value="1">Sim</option><option value="2">Não</option>

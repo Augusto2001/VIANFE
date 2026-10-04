@@ -19,8 +19,9 @@ const context={exports:{},console,Buffer,__dirname:__dirname,require:name=>{
 }};
 vm.runInNewContext(fs.readFileSync(require.resolve('../dist/controllers/nfseController.js'),'utf8'),context);
 const core=context.exports.processNfseEmissionCore;
-const input={company:{id:'a',cnpj:'11111111000111',emite_nfse:1,inscricao_municipal:'1',codigo_tributacao_municipio:'1701001',cnae_padrao:'6920601',item_servico_padrao:'17.01',sefaz_ambiente:'homologacao'},prefeitura:'Salvador',tomador_cnpj:'22222222000122',tomador_nome:'Fixture',valor_servicos:100,aliquota_iss:0,discriminacao_servico:'Fixture',optante_simples_nacional:'1'};
+const input={company:{id:'a',cnpj:'11111111000111',emite_nfse:1,inscricao_municipal:'1',codigo_tributacao_municipio:'1701001',cnae_padrao:'6920601',item_servico_padrao:'17.01',sefaz_ambiente:'homologacao'},prefeitura:'Salvador',tomador_cnpj:'22222222000122',tomador_nome:'Fixture',valor_servicos:100,aliquota_iss:0,discriminacao_servico:'Fixture',optante_simples_nacional:'1',operacao_padrao_confirmada:true};
 (async()=>{
+ await assert.rejects(core({...input,operacao_padrao_confirmada:false}),/Confirme/);assert.equal(calls,0);
  await assert.rejects(core({...input,company:{...input.company,emite_nfse:0}}));assert.equal(calls,0);
  await assert.rejects(core({...input,prefeitura:'Outra cidade'}));assert.equal(calls,0);
  await assert.rejects(core(input),/sem autorização/);assert.equal(calls,1);

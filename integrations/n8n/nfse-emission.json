@@ -31,7 +31,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const i=$input.item.json; const p=i.body || i;\nconst amount=p.valor ?? p.valor_servicos;\nif(typeof amount==='string' && !/^\\d+(\\.\\d{1,2})?$/.test(amount)) throw new Error('Valor deve usar ponto decimal, sem separador de milhar.');\nreturn [{json:{phone:String(p.phone || p.telefone || '').replace(/\\D/g,''),company_cnpj:String(p.company_cnpj || p.cnpj_prestador || '').replace(/\\D/g,''),tomador_cnpj:String(p.tomador_cnpj || '').replace(/\\D/g,''),tomador_nome:String(p.tomador_nome || '').trim(),valor:amount,servico:String(p.servico || p.discriminacao || '').trim(),prefeitura:p.prefeitura,numero_rps:p.numero_rps,serie_rps:p.serie_rps,optante_simples_nacional:p.optante_simples_nacional}}];"
+        "jsCode": "const i=$input.item.json; const p=i.body || i;\nconst amount=p.valor ?? p.valor_servicos;\nif(typeof amount==='string' && !/^\\d+(\\.\\d{1,2})?$/.test(amount)) throw new Error('Valor deve usar ponto decimal, sem separador de milhar.');\nreturn [{json:{phone:String(p.phone || p.telefone || '').replace(/\\D/g,''),company_cnpj:String(p.company_cnpj || p.cnpj_prestador || '').replace(/\\D/g,''),tomador_cnpj:String(p.tomador_cnpj || '').replace(/\\D/g,''),tomador_nome:String(p.tomador_nome || '').trim(),valor:amount,servico:String(p.servico || p.discriminacao || '').trim(),prefeitura:p.prefeitura,numero_rps:p.numero_rps,serie_rps:p.serie_rps,optante_simples_nacional:p.optante_simples_nacional,operacao_padrao_confirmada:p.operacao_padrao_confirmada}}];"
       },
       "id": "normalizar",
       "name": "Normalizar Parametros",

@@ -8,6 +8,8 @@ Pedido recebido, RPS transmitido e nota autorizada são estados distintos. Nunca
 - Compose exige segredo JWT privado; a troca da chave padrão encerra sessões antigas. Segredos permanecem apenas no servidor, fora do Git.
 - Webhook exige CNPJ explícito. Não escolhe Viacont ou primeira empresa como alternativa. O telefone não é prova de autorização.
 - Emissão direta de Salvador exige configuração fiscal e escolha explícita do Simples Nacional. Os outros provedores ficam bloqueados antes da transmissão enquanto seus campos presumidos e retornos não forem homologados.
+- A operação suportada exige confirmação explícita de tributação em Salvador, sem incentivo cultural, descontos, deduções ou outras retenções. Não converter campo ausente em zero sem essa declaração. Demais cenários precisam de parametrização própria.
+- Downloads na tela usam Authorization no cabeçalho, sem JWT na URL.
 - RPS é reservado em transação SQLite; tentativa permanece registrada em `nfse_emission_attempts`. Repetição do mesmo pedido não retransmite. Resultado incerto exige conferência do RPS; não há retry automático de emissão. Novo número de RPS é uma nova solicitação deliberada.
 - Autorização exige retorno completo `InfNfse`, identificação do prestador/tomador, valor compatível, número e verificação oficiais. Recibo de lote ou XML enviado não são nota autorizada.
 - XML é o retorno armazenado, sem reconstrução. PDF é identificado como representação dos dados oficiais, sem brasão ou endereço presumido. Registros antigos sem origem comprovada retornam indisponibilidade até recuperação do original; não são apagados.

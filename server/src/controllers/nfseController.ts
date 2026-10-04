@@ -24,6 +24,7 @@ export const SUPPORTED_PREFEITURAS = [
 export interface ProcessNfseEmissionParams {
   company: any;
   optante_simples_nacional?: '1' | '2';
+  operacao_padrao_confirmada?: boolean;
   prefeitura: string;
   tomador_cnpj: string;
   tomador_nome: string;
@@ -73,6 +74,7 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
   // Other adapters still contain defaults without fiscal evidence. Fail before transmission.
   if (!/^salvador(?: \(webservice direto\))?$/i.test(params.prefeitura) || (params.provedor && params.provedor!=='webservice_direto')) throw new Error('Emissão disponível somente pelo webservice direto de Salvador; demais provedores aguardam validação.');
   if (!['1','2'].includes(String((params as any).optante_simples_nacional))) throw new Error('Informe se o prestador é optante pelo Simples Nacional.');
+  if (params.operacao_padrao_confirmada!==true) throw new Error('Confirme tributação em Salvador, sem incentivo cultural, deduções, descontos ou outras retenções. Operações diferentes exigem parametrização específica.');
   if (params.iss_retido !== undefined && ![true,false,0,1].includes(params.iss_retido)) throw new Error('Retenção de ISS inválida.');
   if (!/^[A-Za-z0-9]{1,5}$/.test(String(params.serie_rps || company.serie_rps || '1'))) throw new Error('Série do RPS inválida.');
   if (!['producao','homologacao'].includes(params.ambiente || company.sefaz_ambiente)) throw new Error('Ambiente fiscal não configurado.');
@@ -174,6 +176,7 @@ export const nfseController = {
       const emissionResult = await processNfseEmissionCore({
         company,
         optante_simples_nacional: req.body.optante_simples_nacional,
+        operacao_padrao_confirmada: req.body.operacao_padrao_confirmada,
         prefeitura,
         tomador_cnpj,
         tomador_nome,
@@ -442,6 +445,7 @@ export const nfseController = {
       const emissionResult = await processNfseEmissionCore({
         company,
         optante_simples_nacional: req.body.optante_simples_nacional,
+        operacao_padrao_confirmada: req.body.operacao_padrao_confirmada,
         prefeitura: pref,
         tomador_cnpj: finalTomadorCnpj,
         tomador_nome: finalTomadorNome || '',

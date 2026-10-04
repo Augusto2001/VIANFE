@@ -169,14 +169,12 @@ export const api = {
     return `${API_BASE}/invoices/${id}/pdf${token ? `?token=${token}` : ''}`;
   },
 
-  getNfsePdfUrl(id: string): string {
-    const token = localStorage.getItem('vianfe_jwt_token');
-    return `${API_BASE}/portal/nfse/${id}/pdf${token ? `?token=${token}` : ''}`;
-  },
-
-  getNfseXmlUrl(id: string): string {
-    const token = localStorage.getItem('vianfe_jwt_token');
-    return `${API_BASE}/portal/nfse/${id}/xml${token ? `?token=${token}` : ''}`;
+  async downloadNfseDocument(id: string, type: 'pdf' | 'xml'): Promise<void> {
+    const response = await fetch(`${API_BASE}/portal/nfse/${encodeURIComponent(id)}/${type}`, { headers: getAuthHeaders() });
+    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || 'Documento oficial indisponível.'); }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = `NFSe_${id}.${type}`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
 
   async downloadZip(
