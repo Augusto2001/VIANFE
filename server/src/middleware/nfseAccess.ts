@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { db } from '../database/db.js';
 
 export function nfseAccess(req: Request, res: Response, next: NextFunction) {
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET==='vianfe_super_secret_jwt_key_2026_viacont') { res.status(503).json({error:'Autenticação fiscal não configurada com segredo privado.'}); return; }
+  if (!process.env.JWT_SECRET || ['vianfe_super_secret_jwt_key_2026_viacont','vianfe_viacont_fiscal_jwt_secret_key_2026'].includes(process.env.JWT_SECRET)) { res.status(503).json({error:'Autenticação fiscal não configurada com segredo privado.'}); return; }
   const identity=(req as any).user;
   const user=identity && db.prepare('SELECT id, tenant_id, role FROM users WHERE id=? AND tenant_id=? AND is_active=1').get(identity.id,identity.tenant_id) as any;
   if (!user) { res.status(403).json({error:'Usuário sem acesso ativo.'}); return; }

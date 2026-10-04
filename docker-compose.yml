@@ -43,7 +43,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://vianfe_user:${POSTGRES_PASSWORD:-vianfe_secure_pg_pass_2026}@vianfe-postgres:5432/vianfe_db
       REDIS_URL: redis://vianfe-redis:6379
-      JWT_SECRET: ${JWT_SECRET:-vianfe_viacont_fiscal_jwt_secret_key_2026}
+      JWT_SECRET: ${JWT_SECRET:?Configure um segredo JWT privado na Oracle}
       SEFAZ_RELAY_URL: ${SEFAZ_RELAY_URL:-https://sefaz-relay.contadordev.com.br}
       APP_DOMAIN: ${APP_DOMAIN:-https://vianfe.contadordev.com.br}
     volumes:

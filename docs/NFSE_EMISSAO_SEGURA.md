@@ -5,6 +5,7 @@
 Pedido recebido, RPS transmitido e nota autorizada são estados distintos. Nunca fabricar número, verificação, XML, endereço, serviço ou autorização.
 
 - Rotas `/portal/nfse` exigem JWT e usuário ativo, tenant correto e vínculo à empresa (administrador limitado ao próprio tenant).
+- Compose exige segredo JWT privado; a troca da chave padrão encerra sessões antigas. Segredos permanecem apenas no servidor, fora do Git.
 - Webhook exige CNPJ explícito. Não escolhe Viacont ou primeira empresa como alternativa. O telefone não é prova de autorização.
 - Emissão direta de Salvador exige configuração fiscal e escolha explícita do Simples Nacional. Os outros provedores ficam bloqueados antes da transmissão enquanto seus campos presumidos e retornos não forem homologados.
 - RPS é reservado em transação SQLite; tentativa permanece registrada em `nfse_emission_attempts`. Repetição do mesmo pedido não retransmite. Resultado incerto exige conferência do RPS; não há retry automático de emissão. Novo número de RPS é uma nova solicitação deliberada.
