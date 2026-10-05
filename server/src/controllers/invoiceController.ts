@@ -6,6 +6,7 @@ import { db, XMLS_DIR, PDFS_DIR } from '../database/db.js';
 import { sefazService } from '../services/sefazService.js';
 import { parseFiscalXml } from '../services/xmlParser.js';
 import { generateDanfePdf } from '../services/danfeGenerator.js';
+import { municipalDocument, originalNfsePdf } from '../services/nfse/originalDocuments.js';
 import { runJlComercioFullIngestion } from '../services/jlComercioIngestionService.js';
 import { reclassifyAndSanitizeDatabase } from '../utils/fiscalClassifier.js';
 
@@ -198,6 +199,9 @@ export const invoiceController = {
       if (/<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(xmlContent)) {
         return res.status(409).json({ success: false, message: 'XML completo pendente de recuperação. Resumo não é arquivo fiscal completo.' });
       }
+      if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xmlContent)) {
+        try { municipalDocument(xmlContent); } catch { return res.status(409).json({success:false,message:'XML municipal incompleto. Recuperação do original necessária.'}); }
+      }
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${invoice.chave_acesso}.xml"`);
       return res.send(xmlContent);
@@ -227,6 +231,10 @@ export const invoiceController = {
         return res.status(409).json({ success: false, message: 'DANFE indisponível: é necessário recuperar o XML completo.' });
       }
       let pdfPath = invoice.pdf_file_path;
+      if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xmlContent)) {
+        try { return res.type('application/pdf').send(await originalNfsePdf(xmlContent)); }
+        catch { return res.status(409).json({success:false,message:'PDF municipal indisponível sem XML original completo.'}); }
+      }
 
       // Always generate/refresh DANFE to official National Standard layout
       if (xmlContent) {
@@ -330,6 +338,7 @@ export const invoiceController = {
 
       const incomplete = invoices.filter((inv: any) => {
         const xml = inv.xml_raw || (inv.xml_file_path && fs.existsSync(inv.xml_file_path) ? fs.readFileSync(inv.xml_file_path, 'utf8') : '');
+        if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xml)) { try {municipalDocument(xml);} catch {return true;} }
         return !xml || /<(?:\w+:)?res(?:NFe|CTe)[\s/>]/.test(xml);
       });
       if (incomplete.length) return res.status(409).json({ success: false, message: `${incomplete.length} nota(s) aguardam XML completo. O pacote não foi gerado para evitar entrega incompleta.`, pending: incomplete.map((inv: any) => ({ id: inv.id, numero: inv.numero })) });
@@ -350,6 +359,11 @@ export const invoiceController = {
             archive.file(inv.xml_file_path, { name: `XML/${inv.chave_acesso}.xml` });
           }
         } else if (type === 'pdf') {
+          const xml = inv.xml_raw || fs.readFileSync(inv.xml_file_path, 'utf8');
+          if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xml)) {
+            archive.append(await originalNfsePdf(xml), {name:`DANFSE/NFSE_${inv.chave_acesso}.pdf`});
+            continue;
+          }
           let pdfPath = inv.pdf_file_path;
           if (!pdfPath || !fs.existsSync(pdfPath)) {
             if (inv.xml_raw) {

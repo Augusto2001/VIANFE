@@ -4,9 +4,10 @@ import https from 'https';
 import crypto from 'crypto';
 import forge from 'node-forge';
 import { XMLParser } from 'fast-xml-parser';
+import { splitMunicipalXml, municipalDocument, originalNfsePdf } from './nfse/originalDocuments.js';
 import { db, CERTS_DIR } from '../database/db.js';
 import { decryptText, cleanNumeric } from '../utils/crypto.js';
-import { nfsePdfGenerator, DanfsePdfItem, MonthlyConferenceData } from './nfsePdfGenerator.js';
+import { nfsePdfGenerator, MonthlyConferenceData } from './nfsePdfGenerator.js';
 import { googleDriveService } from './googleDriveService.js';
 
 export interface MonthlySyncResult {
@@ -212,7 +213,7 @@ export const salvadorNfseMonthlyService = {
     }
 
     // 7. Parse do XML com fast-xml-parser
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', removeNSPrefix: true, parseTagValue: false });
     const parsedDoc = parser.parse(xmlUnescaped);
 
     // Verificação de mensagens de ausência de notas (ex: E43)
@@ -246,6 +247,9 @@ export const salvadorNfseMonthlyService = {
 
     const rawList = parsedDoc.ConsultarNfseResposta?.ListaNfse?.CompNfse || [];
     const compArray = Array.isArray(rawList) ? rawList : (rawList ? [rawList] : []);
+    const originals = splitMunicipalXml(xmlUnescaped);
+    if (originals.length !== compArray.length) throw new Error('Quantidade de documentos originais difere das notas interpretadas.');
+    for (const original of originals) municipalDocument(original);
 
     if (compArray.length === 0) {
       return {
@@ -287,14 +291,14 @@ export const salvadorNfseMonthlyService = {
     const notasParaRelatorio: any[] = [];
     const numerosParaGaps: number[] = [];
 
-    for (const comp of compArray) {
+    for (const [index, comp] of compArray.entries()) {
       const isCancelada = !!comp.NfseCancelamento;
       const infNfse = comp.Nfse?.InfNfse || comp.NfseCancelamento?.Confirmacao?.Pedido?.InfPedidoCancelamento?.IdentificacaoNfse || {};
       const numStr = String(infNfse.Numero || '0').trim();
       const numNum = parseInt(numStr, 10);
       const numPad8 = numStr.padStart(8, '0');
       const codVerif = String(comp.Nfse?.InfNfse?.CodigoVerificacao || '');
-      const dataEmissao = String(comp.Nfse?.InfNfse?.DataEmissao || infNfse.DataEmissao || new Date().toISOString());
+      const dataEmissao = String(comp.Nfse.InfNfse.DataEmissao);
 
       const declaracao = comp.Nfse?.InfNfse?.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico || {};
       const servico = comp.Nfse?.InfNfse?.Servico || declaracao.Servico || {};
@@ -302,18 +306,18 @@ export const salvadorNfseMonthlyService = {
 
       const valServ = parseFloat(String(valores.ValorServicos || '0'));
       const valIss = parseFloat(String(valores.ValorIss || '0'));
-      const aliquotaDec = parseFloat(String(valores.Aliquota || '0.05'));
+      const aliquotaDec = parseFloat(String(valores.Aliquota ?? 'NaN'));
       const aliquotaPerc = aliquotaDec > 1 ? aliquotaDec : (aliquotaDec * 100);
       const issRetido = String(valores.IssRetido || '') === '1';
-      const discriminacao = String(servico.Discriminacao || 'Prestação de Serviços').trim();
-      const itemServico = String(servico.ItemListaServico || '17.01');
+      const discriminacao = String(servico.Discriminacao || '').trim();
+      const itemServico = String(servico.ItemListaServico || '');
 
       const tomadorObj = comp.Nfse?.InfNfse?.TomadorServico || declaracao.TomadorServico || infNfse.Tomador || {};
       const tomadorNome = String(tomadorObj.RazaoSocial || tomadorObj.NomeTomador || 'Tomador Não Informado').trim();
       const tomadorDoc = cleanNumeric(tomadorObj.IdentificacaoTomador?.CpfCnpj?.Cnpj || tomadorObj.IdentificacaoTomador?.CpfCnpj?.Cpf || '');
       const tomadorEnder = tomadorObj.Endereco || {};
-      const tomadorMun = String(tomadorEnder.xMun || tomadorEnder.CodigoMunicipio || 'Salvador');
-      const tomadorUf = String(tomadorEnder.Uf || 'BA');
+      const tomadorMun = String(tomadorEnder.xMun || tomadorEnder.CodigoMunicipio || '');
+      const tomadorUf = String(tomadorEnder.Uf || '');
 
       if (isCancelada) {
         canceladas++;
@@ -335,33 +339,11 @@ export const salvadorNfseMonthlyService = {
       const indPdfStoragePath = path.join(storageDir, indPdfFileName);
 
       // Salva XML individual
-      const xmlCompStr = `<?xml version="1.0" encoding="utf-8"?>\n<CompNfse xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd">\n  <Nfse xmlns="http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd">\n    <!-- NFSe Nº ${numStr} emitido em ${dataEmissao} -->\n  </Nfse>\n</CompNfse>`;
+      const xmlCompStr = originals[index];
       fs.writeFileSync(indXmlStoragePath, xmlCompStr, 'utf8');
 
       // Gera DANFSe PDF
-      const pdfItem: DanfsePdfItem = {
-        numero: numStr,
-        codigoVerificacao: codVerif,
-        dataEmissao,
-        prestadorNome: company.razao_social,
-        prestadorCnpj: company.cnpj,
-        prestadorCga: cga,
-        prestadorMunicipio: 'Salvador',
-        prestadorUf: 'BA',
-        tomadorNome,
-        tomadorDoc,
-        tomadorMunicipio: tomadorMun,
-        tomadorUf: tomadorUf,
-        valorServicos: valServ,
-        aliquota: aliquotaPerc,
-        valorIss: valIss,
-        issRetido,
-        discriminacao,
-        itemServico,
-        isCancelada
-      };
-
-      await nfsePdfGenerator.generateDanfsePdf(pdfItem, indPdfStoragePath);
+      fs.writeFileSync(indPdfStoragePath, await originalNfsePdf(xmlCompStr));
 
       // Copia para pasta do Google Drive local se disponível
       if (localDriveDir) {
@@ -403,7 +385,7 @@ export const salvadorNfseMonthlyService = {
             dataEmissao,
             cleanCnpj,
             company.razao_social,
-            tomadorDoc || '00000000000',
+            tomadorDoc,
             tomadorNome,
             tomadorUf,
             valServ,
@@ -435,7 +417,7 @@ export const salvadorNfseMonthlyService = {
             dataEmissao,
             cleanCnpj,
             company.razao_social,
-            tomadorDoc || '00000000000',
+            tomadorDoc,
             tomadorNome,
             tomadorUf,
             valServ,

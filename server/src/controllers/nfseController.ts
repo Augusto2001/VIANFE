@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { emissionKey, officialNfse } from '../services/nfse/emissionSafety.js';
+import { originalNfsePdf } from '../services/nfse/originalDocuments.js';
 import path from 'path';
 import { Request, Response } from 'express';
 import { db } from '../database/db.js';
@@ -225,13 +226,8 @@ export const nfseController = {
     try {
       const row=db.prepare('SELECT a.official_xml,c.cnpj FROM nfse_emission_attempts a JOIN companies c ON c.id=a.company_id WHERE a.state=? AND json_extract(a.response_json,\'$.id\')=?').get('autorizada',String(req.params.id)) as any;
       if(!row) {res.status(409).json({error:'XML oficial verificado indisponível. PDF não será reconstruído com dados presumidos.'});return;}
-      const n=officialNfse(row.official_xml,{cnpj:row.cnpj});
-      const doc=new PDFDocument({margin:40});
-      res.type('application/pdf');doc.pipe(res);
-      doc.fontSize(18).text('Representação da NFS-e '+n.numero);
-      doc.fontSize(11).text('Dados extraídos do XML retornado pela prefeitura.');
-      for(const [label,value] of Object.entries({Emissão:n.data,Verificação:n.codigo,Prestador:n.prestador,CNPJ:n.cnpj,Tomador:n.tomador,Documento:n.doc,Serviço:n.descricao,Valor:n.valor.toFixed(2)}))doc.moveDown().text(label+': '+value);
-      doc.end();
+      officialNfse(row.official_xml,{cnpj:row.cnpj});
+      res.type('application/pdf').send(await originalNfsePdf(row.official_xml));
     }catch(err:any){res.status(409).json({error:err.message});}
   },
   async getXml(req:Request,res:Response):Promise<void>{
