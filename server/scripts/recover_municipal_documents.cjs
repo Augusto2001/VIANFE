@@ -6,7 +6,8 @@ const [cnpj,period,flag]=process.argv.slice(2);
 if(!/^\d{14}$/.test(cnpj||'')||! /^(0[1-9]|1[0-2])\.\d{4}$/.test(period||'')||!['--check','--apply'].includes(flag)){throw new Error('Use CNPJ MM.AAAA --check ou --apply');}
 const storage=path.resolve(__dirname,'../storage');
 const dir=path.join(storage,'exports/nfse',cnpj,period.slice(3),period);
-const input=path.join(dir,`NFSe_CONSOLIDADO_${period}.xml`);
+const input=process.env.VIANFE_MUNICIPAL_SOURCE || path.join(dir,`NFSe_CONSOLIDADO_${period}.xml`);
+if(!path.isAbsolute(input))throw new Error('Fonte deve ter caminho absoluto');
 const source=fs.readFileSync(input,'utf8');
 const db=new DatabaseSync(path.join(storage,'data/fiscal_hub.db'),{readOnly:flag==='--check'});
 (async()=>{
@@ -14,7 +15,7 @@ const db=new DatabaseSync(path.join(storage,'data/fiscal_hub.db'),{readOnly:flag
  const companyId=companies[0].id;const entries=[];const seen=new Set();
  for(const xml of splitMunicipalXml(source)){
   const {note}=municipalDocument(xml);const prest=note.PrestadorServico?.IdentificacaoPrestador?.Cnpj;
-  if(String(prest)!==cnpj||!/^\d+$/.test(note.Numero))throw new Error('Prestador/número inválido');
+  if(String(prest||'').replace(/[.\/-]/g,'')!==cnpj||!/^\d+$/.test(note.Numero))throw new Error('Prestador/número inválido');
   if(seen.has(note.Numero))throw new Error('Número duplicado no consolidado');seen.add(note.Numero);
   const rows=db.prepare("SELECT id,xml_raw,xml_file_path,pdf_file_path FROM invoices WHERE company_id=? AND modelo='NFS-e' AND CAST(numero AS INTEGER)=?").all(companyId,Number(note.Numero));
   if(rows.length!==1)throw new Error('Registro ausente/duplicado: '+note.Numero);

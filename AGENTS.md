@@ -1,6 +1,6 @@
 # Regras obrigatórias do ViaNFe
 
-- Antes de retomar o projeto, ler `docs/VERSAO_ATUAL.md`, o relatório de versão ali indicado e `docs/NFSE_EMISSAO_SEGURA.md`. Versão operacional atual: 1.5; conferir GitHub/Oracle ao vivo, pois a documentação não substitui essa verificação.
+- Antes de retomar o projeto, ler `docs/VERSAO_ATUAL.md`, o relatório de versão ali indicado e `docs/NFSE_EMISSAO_SEGURA.md`. Versão operacional atual: 1.6; conferir GitHub/Oracle ao vivo, pois a documentação não substitui essa verificação.
 
 - GitHub origin/main é a fonte oficial. Não publicar a partir de cópias antigas.
 - Toda alteração deve terminar com testes, commit, push, deploy do mesmo SHA na Oracle e validação em produção. Se faltar uma etapa, declarar pendente.
