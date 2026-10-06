@@ -1,11 +1,11 @@
 {
-  "versao_operacional": "1.4",
+  "versao_operacional": "1.5",
   "revisao_documental": 1,
   "inicio_da_serie": "2026-10-05",
   "proposta": "Emissão segura de NFS-e e integração autenticada n8n/ZapCont",
   "commit_base_anterior": "b32532a994a97f509ef449a80fcf94123f6bc010",
   "estado": "publicado_com_homologacao_fiscal_pendente",
-  "documento": "docs/versoes/1.4.md",
+  "documento": "docs/versoes/1.5.md",
   "workflow_id": "4Wn1e4VIXmBFUs0V",
   "workflow_versao_publicada": "0e3efb18-96a2-4769-a4fb-cf40436c957b"
 }
