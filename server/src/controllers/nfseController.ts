@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { listNfseDocuments } from '../services/nfse/listDocuments.js';
 import { emissionKey, officialNfse } from '../services/nfse/emissionSafety.js';
 import { originalNfsePdf } from '../services/nfse/originalDocuments.js';
 import path from 'path';
@@ -131,7 +132,7 @@ export const nfseController = {
         return;
       }
 
-      const rows = db.prepare('SELECT * FROM nfse_issued WHERE company_id = ? ORDER BY issued_at DESC').all(companyId);
+      const rows = listNfseDocuments(db, companyId);
       res.json(rows);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

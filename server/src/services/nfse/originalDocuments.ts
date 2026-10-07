@@ -1,5 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import PDFDocument from 'pdfkit';
+import { fiscalDecimal } from '../../utils/fiscalDecimal.js';
 
 /** Extract original subtrees without rebuilding signed fiscal content. */
 export function splitMunicipalXml(xml: string): string[] {
@@ -42,7 +43,7 @@ export function municipalDocument(xml:string) {
   visit(tree);
   if(notes.length!==1 || !notes[0].Numero || !notes[0].CodigoVerificacao || !notes[0].DataEmissao) throw new Error('XML não contém uma única NFS-e identificada.');
   const service=notes[0].Servico || notes[0].DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Servico;
-  if(!service?.Discriminacao || service.Valores?.ValorServicos===undefined || !Number.isFinite(Number(service.Valores.ValorServicos))) throw new Error('XML sem serviço ou valor original.');
+  if(!service?.Discriminacao || service.Valores?.ValorServicos===undefined || !Number.isFinite(fiscalDecimal(service.Valores.ValorServicos))) throw new Error('XML sem serviço ou valor original.');
   return {tree,note:notes[0]};
 }
 

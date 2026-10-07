@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
+import { fiscalDecimal } from '../utils/fiscalDecimal.js';
 import { cleanNumeric } from '../utils/crypto.js';
 import { parseNfseNacional } from './nfseNacionalParser.js';
 
@@ -655,15 +656,15 @@ export function parseNfse(parsedObj: any): ParsedFiscalInvoice {
   const declaration = infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico || {};
   const valores = {...(declaration.Servico?.Valores || infNfse.Servico?.Valores || {}), ...(infNfse.ValoresNfse || {})};
   if (valores.ValorServicos == null) throw new Error('NFS-e municipal sem valor dos serviços.');
-  const valorServicos = parseFloat(valores.ValorServicos || '0');
-  const valorDeducoes = parseFloat(valores.ValorDeducoes || '0');
-  const valorPis = parseFloat(valores.ValorPis || '0');
-  const valorCofins = parseFloat(valores.ValorCofins || '0');
-  const valorInss = parseFloat(valores.ValorInss || '0');
-  const valorIr = parseFloat(valores.ValorIr || '0');
-  const valorCsll = parseFloat(valores.ValorCsll || '0');
-  const valorIss = parseFloat(valores.ValorIss || '0');
-  const valorLiquido = parseFloat(valores.ValorLiquidoNfse ?? valores.ValorLiquido ?? String(valorServicos));
+  const valorServicos = fiscalDecimal(valores.ValorServicos || '0');
+  const valorDeducoes = fiscalDecimal(valores.ValorDeducoes || '0');
+  const valorPis = fiscalDecimal(valores.ValorPis || '0');
+  const valorCofins = fiscalDecimal(valores.ValorCofins || '0');
+  const valorInss = fiscalDecimal(valores.ValorInss || '0');
+  const valorIr = fiscalDecimal(valores.ValorIr || '0');
+  const valorCsll = fiscalDecimal(valores.ValorCsll || '0');
+  const valorIss = fiscalDecimal(valores.ValorIss || '0');
+  const valorLiquido = fiscalDecimal(valores.ValorLiquidoNfse ?? valores.ValorLiquido ?? String(valorServicos));
   if (![valorServicos, valorLiquido].every(Number.isFinite)) throw new Error('Valores inválidos na NFS-e municipal.');
   
   const prestador = infNfse.PrestadorServico || infNfse.DeclaracaoPrestacaoServico?.InfDeclaracaoPrestacaoServico?.Prestador || infNfse.Prestador || infNfse.IdentificacaoPrestador || {};

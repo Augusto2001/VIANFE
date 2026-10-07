@@ -622,7 +622,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                         {nfse.prefeitura}
                       </span>
                       <span className="text-[10px] text-slate-500 font-mono">
-                        Cód: {nfse.codigo_verificacao}
+                        {nfse.codigo_verificacao ? 'Cód: ' + nfse.codigo_verificacao : nfse.issued_at?.slice(0, 10)}
                       </span>
                     </div>
                     <p className="text-xs text-slate-300 truncate">
@@ -640,13 +640,13 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                       R$ {Number(nfse.valor_servicos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </div>
                     <span className="text-[10px] text-slate-400">
-                      ISS ({nfse.aliquota_iss}%): R$ {Number(nfse.valor_iss).toFixed(2)}
+                      {nfse.document_source === 'invoice' ? 'Tributos conforme XML original' : <>ISS ({nfse.aliquota_iss}%): R$ {Number(nfse.valor_iss).toFixed(2)}</>}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <a
-                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'pdf').catch(err => alert(err.message)); }}
+                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'pdf', nfse.document_source).catch(err => alert(err.message)); }}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
@@ -657,7 +657,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                     </a>
 
                     <a
-                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'xml').catch(err => alert(err.message)); }}
+                      href="#" onClick={e => { e.preventDefault(); api.downloadNfseDocument(nfse.id, 'xml', nfse.document_source).catch(err => alert(err.message)); }}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-700 shadow-sm"
@@ -667,6 +667,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                       <span>XML</span>
                     </a>
 
+                    {nfse.document_source !== 'invoice' && <>
                     <a
                       href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Olá! Segue o link do seu Documento Fiscal (RPS/NFS-e Nº ${nfse.numero_nfse}) emitido por Viacont: https://vianfe.contadordev.com.br/api/portal/nfse/${nfse.id}/pdf`)}`}
                       target="_blank"
@@ -684,7 +685,7 @@ export const NfseView: React.FC<NfseViewProps> = ({ selectedCompany }) => {
                       title="Excluir Registro de Teste"
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </button></>}
                   </div>
                 </div>
               </div>

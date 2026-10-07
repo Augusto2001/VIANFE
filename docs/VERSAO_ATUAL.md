@@ -1,11 +1,11 @@
-# ViaNFe — versão operacional 1.6
+# ViaNFe — versão operacional 1.7
 
 Registro iniciado em 05/10/2026, fuso America/Sao_Paulo, por solicitação do proprietário.
 
-Leia o relatório atual: [versão 1.6 — recuperação por fonte original externa](versoes/1.6.md). Histórico: [versão 1.2](versoes/1.2.md).
+Leia o relatório atual: [versão 1.7 — decimais municipais e documentos recuperados](versoes/1.7.md). Histórico: [versão 1.2](versoes/1.2.md).
 
 - **1** identifica a primeira proposta registrada nesta nova série: emissão segura de NFS-e e integração autenticada com n8n/ZapCont.
-- **6** identifica seis rodadas de ajustes posteriores à implementação inicial.
+- **6** identifica sete rodadas de ajustes posteriores à implementação inicial.
 - Não é uma reconstrução da numeração histórica do produto. O `1.0.0` dos pacotes npm é uma versão técnica anterior, sem esse significado operacional.
 - Base anterior: `b32532a994a97f509ef449a80fcf94123f6bc010`. Para o commit atual, conferir GitHub/main e a revisão da imagem ativa, sem usar a base histórica como versão atual.
 - Metadados para ferramentas: [versao-operacional.json](../versao-operacional.json).

@@ -169,8 +169,9 @@ export const api = {
     return `${API_BASE}/invoices/${id}/pdf${token ? `?token=${token}` : ''}`;
   },
 
-  async downloadNfseDocument(id: string, type: 'pdf' | 'xml'): Promise<void> {
-    const response = await fetch(`${API_BASE}/portal/nfse/${encodeURIComponent(id)}/${type}`, { headers: getAuthHeaders() });
+  async downloadNfseDocument(id: string, type: 'pdf' | 'xml', source?: string): Promise<void> {
+    const route = source === 'invoice' ? 'invoices' : 'portal/nfse';
+    const response = await fetch(`${API_BASE}/${route}/${encodeURIComponent(id)}/${type}`, { headers: getAuthHeaders() });
     if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || 'Documento oficial indisponível.'); }
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement('a'); link.href = url; link.download = `NFSe_${id}.${type}`; link.click();
