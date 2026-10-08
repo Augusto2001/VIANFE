@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db, XMLS_DIR, PDFS_DIR, STORAGE_DIR } from '../database/db.js';
 import { parseFiscalXml, ParsedFiscalInvoice } from './xmlParser.js';
 import { generateDanfePdf } from './danfeGenerator.js';
+import { originalNfsePdf } from './nfse/originalDocuments.js';
 import { syncXmlInstallments } from './invoiceInstallments.js';
 import { googleDriveService } from './googleDriveService.js';
 import { sefazDfeClient } from './sefazDfeClient.js';
@@ -109,7 +110,11 @@ export class SefazService {
 
     // Generate DANFE PDF
     try {
-      await generateDanfePdf(parsed, pdfFilePath);
+      if (parsed.nfseMunicipal || parsed.nfseNacional) {
+        fs.writeFileSync(pdfFilePath, await originalNfsePdf(xmlString));
+      } else {
+        await generateDanfePdf(parsed, pdfFilePath);
+      }
     } catch (pdfErr: any) {
       console.warn(`Could not pre-generate DANFE for ${parsed.chaveAcesso}:`, pdfErr.message);
     }
@@ -160,7 +165,8 @@ export class SefazService {
           info_adicional = ?,
           xml_raw = ?,
           xml_file_path = ?,
-          pdf_file_path = ?
+          pdf_file_path = ?,
+          gdrive_synced = 0
         WHERE id = ?
       `).run(
         actualCompanyId,

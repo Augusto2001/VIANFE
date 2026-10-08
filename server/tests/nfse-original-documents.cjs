@@ -19,6 +19,12 @@ const note=n=>`<CompNfse><Nfse><InfNfse Id="N${n}"><Numero>${n}</Numero><CodigoV
  }
  assert(text.total>1,'descrição longa deve paginar');
  assert(!text.text.includes('5.00%'));await parser.destroy();
+ const national=require('./nfse-nacional.cjs');
+ const nationalPdf=await originalNfsePdf(national.xml);
+ const np=new PDFParse({data:nationalPdf});const nt=await np.getText();
+ for(const expected of [national.key,'430.00','0.00','Serviço detalhado','Não é o PDF']) assert(nt.text.includes(expected),expected);
+ await np.destroy();
+ await assert.rejects(()=>originalNfsePdf(national.xml.replace('<cStat>100</cStat>','<cStat>999</cStat>')));
  console.log('PASS: XML original, namespaces, assinatura preservada, CDATA, zero real, retenção/líquido/endereço e descrição longa paginada. Sem rede.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 

@@ -231,9 +231,9 @@ export const invoiceController = {
         return res.status(409).json({ success: false, message: 'DANFE indisponível: é necessário recuperar o XML completo.' });
       }
       let pdfPath = invoice.pdf_file_path;
-      if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xmlContent)) {
+      if (/<(?:\w+:)?(?:CompNfse|InfNfse|infNFSe)[\s/>]/.test(xmlContent)) {
         try { return res.type('application/pdf').send(await originalNfsePdf(xmlContent)); }
-        catch { return res.status(409).json({success:false,message:'PDF municipal indisponível sem XML original completo.'}); }
+        catch { return res.status(409).json({success:false,message:'PDF de serviços indisponível sem XML original completo.'}); }
       }
 
       // Always generate/refresh DANFE to official National Standard layout
@@ -360,7 +360,7 @@ export const invoiceController = {
           }
         } else if (type === 'pdf') {
           const xml = inv.xml_raw || fs.readFileSync(inv.xml_file_path, 'utf8');
-          if (/<(?:\w+:)?(?:CompNfse|InfNfse)[\s/>]/.test(xml)) {
+          if (/<(?:\w+:)?(?:CompNfse|InfNfse|infNFSe)[\s/>]/.test(xml)) {
             archive.append(await originalNfsePdf(xml), {name:`DANFSE/NFSE_${inv.chave_acesso}.pdf`});
             continue;
           }

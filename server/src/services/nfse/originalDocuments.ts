@@ -1,6 +1,7 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import PDFDocument from 'pdfkit';
 import { fiscalDecimal } from '../../utils/fiscalDecimal.js';
+import { parseNfseNacional } from '../nfseNacionalParser.js';
 
 /** Extract original subtrees without rebuilding signed fiscal content. */
 export function splitMunicipalXml(xml: string): string[] {
@@ -49,13 +50,16 @@ export function municipalDocument(xml:string) {
 
 /** Display every fiscal field present; absent fields are never replaced by guesses. */
 export async function originalNfsePdf(xml:string):Promise<Buffer> {
-  const {tree,note}=municipalDocument(xml);
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml) || XMLValidator.validate(xml)!==true) throw new Error('XML fiscal inválido.');
+  const parsedTree=new XMLParser({ignoreAttributes:false,removeNSPrefix:true,parseTagValue:false,parseAttributeValue:false}).parse(xml);
+  const national=parsedTree.NFSe?.infNFSe ? parseNfseNacional(parsedTree.NFSe) : null;
+  const {tree,note}=national ? {tree:parsedTree,note:{Numero:national.numero,DataEmissao:national.dataEmissao,CodigoVerificacao:national.chaveAcesso}} : municipalDocument(xml);
   return new Promise((resolve,reject)=>{
     const doc=new PDFDocument({size:'A4',margin:42,bufferPages:true});
     const chunks:Buffer[]=[];
     doc.on('data',c=>chunks.push(c));doc.on('error',reject);doc.on('end',()=>resolve(Buffer.concat(chunks)));
     doc.fontSize(18).font('Helvetica-Bold').text('NFS-e '+String(note.Numero));
-    doc.moveDown(0.4).font('Helvetica').fontSize(9).text('Representação gerada pelo ViaNFe a partir do XML municipal. Não é o PDF disponibilizado pela prefeitura.');
+    doc.moveDown(0.4).font('Helvetica').fontSize(9).text('Representação gerada pelo ViaNFe a partir do XML fiscal original. Não é o PDF disponibilizado pela autoridade fiscal.');
     doc.moveDown().fontSize(10).text('Emissão: '+note.DataEmissao+'   |   Verificação: '+note.CodigoVerificacao);
     doc.moveDown();
     const labels:Record<string,string>={InfNfse:'Dados da nota',PrestadorServico:'Prestador',TomadorServico:'Tomador',Servico:'Serviço',Valores:'Valores e tributos',ValoresNfse:'Valores da NFS-e',Discriminacao:'Descrição do serviço',CodigoTributacaoMunicipio:'Código de tributação municipal',ItemListaServico:'Item da lista de serviços',OptanteSimplesNacional:'Optante pelo Simples Nacional (código do XML)',IssRetido:'ISS retido (código do XML)',NfseCancelamento:'Cancelamento'};

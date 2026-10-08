@@ -11,7 +11,7 @@ export function parseNfseNacional(root: any): ParsedFiscalInvoice {
       !/^\d{4}-\d{2}-\d{2}T/.test(dps.dhEmi || '') ||
       dps?.valores?.vServPrest?.vServ == null || inf?.valores?.vLiq == null ||
       !Number.isFinite(gross) || !Number.isFinite(net) || gross < 0 || net < 0 ||
-      String(dps.tpAmb) !== '1' || String(inf.cStat) !== '100')
+      String(dps.tpAmb) !== '1' || !['100','107'].includes(String(inf.cStat)))
     throw new Error('NFS-e Nacional sem identificação, valores ou autorização de produção válidos.');
   if (dps.prest?.CNPJ && dps.prest.CNPJ !== emit.CNPJ) throw new Error('Prestador da DPS diverge do emitente da NFS-e.');
   const addr = emit.enderNac || {}, dest = toma?.end || {};

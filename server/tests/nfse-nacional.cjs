@@ -14,6 +14,7 @@ assert.deepEqual(p.itens,[]);
 assert.deepEqual(p.duplicatas,[]);
 assert.deepEqual(p.pagamentos,[]);
 assert.equal(p.destinatario.uf,'');
+assert.equal(parseFiscalXml(xml.replace('<cStat>100</cStat>','<cStat>107</cStat>')).numero,'7');
 assert.throws(()=>parseFiscalXml(xml.replace('<cStat>100</cStat>','<cStat>999</cStat>')));
 assert.throws(()=>parseFiscalXml(xml.replace('<tpAmb>1</tpAmb>','<tpAmb>2</tpAmb>')));
 assert.throws(()=>parseFiscalXml(xml.replace('<vLiq>0.00</vLiq>','')));
