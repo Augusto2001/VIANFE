@@ -1,13 +1,13 @@
-# ViaNFe — versão operacional 1.8
+# ViaNFe — versão operacional 1.9
 
-Registro iniciado em 05/10/2026, fuso America/Sao_Paulo, por solicitação do proprietário.
+Registro atualizado em 09/10/2026, fuso America/Sao_Paulo, por solicitação do proprietário.
 
-Leia o relatório atual: [versão 1.8 — PDF de serviços e recuperação de originais](versoes/1.8.md). Histórico: [versão 1.2](versoes/1.2.md).
+Leia o relatório atual: [versão 1.9 — Integração Nativa do Robô SVRS NFC-e (modelo 65)](versoes/1.9.md). Histórico: [versão 1.8](versoes/1.8.md), [versão 1.2](versoes/1.2.md).
 
-- **1** identifica a primeira proposta registrada nesta nova série: emissão segura de NFS-e e integração autenticada com n8n/ZapCont.
-- **8** identifica oito rodadas de ajustes posteriores à implementação inicial.
+- **1** identifica a proposta funcional registrada nesta série: emissão segura de NFS-e, captura fiscal DFe e integrações autenticadas.
+- **9** identifica nove rodadas de ajustes posteriores à implementação inicial.
 - Não é uma reconstrução da numeração histórica do produto. O `1.0.0` dos pacotes npm é uma versão técnica anterior, sem esse significado operacional.
-- Base anterior: `23466e350c16ff659efda44ed1191ff074e5188d`. Para o commit atual, conferir GitHub/main e a revisão da imagem ativa, sem usar a base histórica como versão atual.
+- Base anterior: `5a97e4862564e34a201c38c17c81e2465c3e8e4a`. Commit atual publicado: `0871dccc23d51561a3dac3d41b14ab33cd2aac8a`. Para o commit atual, conferir GitHub/main e a revisão da imagem ativa na Oracle.
 - Metadados para ferramentas: [versao-operacional.json](../versao-operacional.json).
 
 ## Regra para todas as IAs

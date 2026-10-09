@@ -158,7 +158,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onClose 
 
                 <div className="text-right hidden sm:block">
                   <span className="text-xs font-black text-emerald-400">100% AUDITADO</span>
-                  <p className="text-[10px] text-slate-500">Zero Risco Fiscal</p>
+                  <p className="text-[10px] text-slate-500">Mais controle e rastreabilidade fiscal</p>
                 </div>
               </div>
 
