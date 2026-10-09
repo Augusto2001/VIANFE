@@ -47,6 +47,7 @@ router.post('/companies/:id/certificate', verifyJwtAndTenant, uploadTemp.single(
 router.get('/cnpj/lookup/:cnpj', verifyJwtAndTenant, companyController.searchCnpj);
 router.get('/companies/:id/test-certificate', verifyJwtAndTenant, companyController.testCertificate);
 router.post('/companies/:id/sync-sefaz', verifyJwtAndTenant, companyController.syncSefaz);
+router.post('/companies/:id/sync-nfce-svrs', verifyJwtAndTenant, companyController.syncNfceSvrs);
 
 // Invoice Routes (Protected by JWT & Tenant / Public Document Streaming)
 router.get('/invoices', verifyJwtAndTenant, invoiceController.list);

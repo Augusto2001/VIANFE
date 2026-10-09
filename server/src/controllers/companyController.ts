@@ -528,5 +528,45 @@ export const companyController = {
       console.error('Error in SEFAZ sync:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
+  },
+
+  /**
+   * Baixa e sincroniza cupons fiscais NFC-e (modelo 65) diretamente da SVRS (SEFAZ RS)
+   */
+  async syncNfceSvrs(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as any;
+      if (!company) {
+        return res.status(404).json({ success: false, message: 'Empresa não encontrada.' });
+      }
+
+      if (!company.cert_filename) {
+        return res.status(400).json({
+          success: false,
+          message: 'Esta empresa não possui Certificado Digital A1 cadastrado. Faça o upload do certificado .pfx primeiro.',
+        });
+      }
+
+      const chaves: string[] = Array.isArray(req.body?.chaves) ? req.body.chaves : [];
+      if (chaves.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Nenhuma chave de acesso de NFC-e informada no corpo da requisição (campo "chaves").',
+        });
+      }
+
+      const { sefazService } = await import('../services/sefazService.js');
+      const result = await sefazService.syncNfceFromSvrs(id, chaves);
+
+      return res.json({
+        success: true,
+        data: result,
+        message: `Sincronização SVRS NFC-e concluída: ${result.downloaded} baixadas, ${result.errors} erros.`,
+      });
+    } catch (err: any) {
+      console.error('Error in SVRS NFC-e sync:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
   }
 };

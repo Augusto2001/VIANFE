@@ -1,11 +1,11 @@
 {
-  "versao_operacional": "1.8",
+  "versao_operacional": "1.9",
   "revisao_documental": 1,
-  "inicio_da_serie": "2026-10-05",
-  "proposta": "Emissão segura de NFS-e e integração autenticada n8n/ZapCont",
-  "commit_base_anterior": "23466e350c16ff659efda44ed1191ff074e5188d",
+  "inicio_da_serie": "2026-10-09",
+  "proposta": "Integração nativa do robô de busca e download de NFC-e (modelo 65) na SEFAZ Virtual do RS (SVRS)",
+  "commit_base_anterior": "5a97e4862564e34a201c38c17c81e2465c3e8e4a",
   "estado": "publicado_com_homologacao_fiscal_pendente",
-  "documento": "docs/versoes/1.8.md",
+  "documento": "docs/versoes/1.9.md",
   "workflow_id": "4Wn1e4VIXmBFUs0V",
   "workflow_versao_publicada": "0e3efb18-96a2-4769-a4fb-cf40436c957b"
 }

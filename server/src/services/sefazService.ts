@@ -8,6 +8,7 @@ import { originalNfsePdf } from './nfse/originalDocuments.js';
 import { syncXmlInstallments } from './invoiceInstallments.js';
 import { googleDriveService } from './googleDriveService.js';
 import { sefazDfeClient } from './sefazDfeClient.js';
+import { svrsNfceClient } from './svrsNfceClient.js';
 import { cleanNumeric } from '../utils/crypto.js';
 import { getInvoiceStoragePaths } from '../utils/driveFolderMatcher.js';
 import { classifyFiscalDirection, isSameCompany } from '../utils/fiscalClassifier.js';
@@ -678,6 +679,34 @@ export class SefazService {
 
       throw err;
     }
+  }
+
+  /**
+   * Baixa e ingere NFC-e (modelo 65) diretamente da SEFAZ Virtual do RS (SVRS)
+   */
+  public async syncNfceFromSvrs(companyId: string, chaves: string[]): Promise<{ downloaded: number; errors: number; details: any[] }> {
+    let downloaded = 0;
+    let errors = 0;
+    const details: any[] = [];
+
+    for (const chave of chaves) {
+      try {
+        const res = await svrsNfceClient.downloadNfceXml(companyId, chave);
+        if (res.success && res.xmlContent) {
+          await this.ingestXml(companyId, res.xmlContent, 'sefaz_dfe');
+          downloaded++;
+          details.push({ chave, status: 'baixado', protocolo: res.protocolo });
+        } else {
+          errors++;
+          details.push({ chave, status: 'erro', motivo: res.error });
+        }
+      } catch (err: any) {
+        errors++;
+        details.push({ chave, status: 'falha', motivo: err.message });
+      }
+    }
+
+    return { downloaded, errors, details };
   }
 }
 
