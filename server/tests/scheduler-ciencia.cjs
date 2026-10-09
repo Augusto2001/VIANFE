@@ -16,7 +16,8 @@ const stubs = {
   '../database/db.js':{db:{prepare:()=>({all:()=>{companyReads++;return []}})}},
   '../services/sefazService.js':{sefazService:{}},
   '../services/googleDriveService.js':{googleDriveService:{}},
-  '../services/predictiveAlertsService.js':{predictiveAlertsService:{}}
+  '../services/predictiveAlertsService.js':{predictiveAlertsService:{}},
+  '../services/morningSalesSyncService.js':{morningSalesSyncService:{runMorningBatchSync:async()=>({})}}
 };
 const exportsObject={};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/jobs/scheduler.js'),'utf8'),{
@@ -25,7 +26,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist/jobs/scheduler.j
 });
 (async()=>{
   exportsObject.initScheduler();
-  assert.equal(schedules.length, 6);
+  assert.equal(schedules.length, 8);
   for(const item of schedules)assert.equal(item.options.timezone,'America/Sao_Paulo');
   const nightly=schedules.find(s=>s.expression==='30 2 * * *');
   nightly.callback();await Promise.resolve();assert.equal(launches,0);
