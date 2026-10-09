@@ -14,11 +14,12 @@ import {
   X,
   Activity,
   Receipt,
-  PieChart
+  PieChart,
+  GitBranch
 } from 'lucide-react';
 import { Company } from '../types';
 
-export type NavTab = 'dashboard' | 'bpo' | 'business_success' | 'tax_audit' | 'client_portal' | 'companies' | 'drive' | 'import' | 'analytics' | 'nfse';
+export type NavTab = 'dashboard' | 'bpo' | 'business_success' | 'tax_audit' | 'client_portal' | 'companies' | 'drive' | 'import' | 'analytics' | 'nfse' | 'versions';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -127,6 +128,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Drive & Logs',
           icon: Cloud,
           badge: { text: 'Backup', variant: 'feature' },
+        },
+        {
+          id: 'versions',
+          label: 'Versões & Novidades',
+          icon: GitBranch,
+          badge: { text: 'v1.9', variant: 'success' },
         },
       ],
     },

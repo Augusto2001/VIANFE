@@ -22,6 +22,7 @@ interface HeaderProps {
   selectedCompany: Company | null;
   onSelectCompany: (company: Company) => void;
   activeTab: NavTab;
+  onTabChange?: (tab: NavTab) => void;
   onQuickSync: () => void;
   isSyncing: boolean;
   onOpenNewCompanyModal: () => void;
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   selectedCompany,
   onSelectCompany,
   activeTab,
+  onTabChange,
   onQuickSync,
   isSyncing,
   onOpenNewCompanyModal,
@@ -306,11 +308,30 @@ export const Header: React.FC<HeaderProps> = ({
               title={theme === 'dark' ? 'Alternar para Tema Claro' : 'Alternar para Modo Noturno'}
             >
               {theme === 'dark' ? (
-                <Sun className="w-4 h-4 text-amber-400" />
+                 <Sun className="w-4 h-4 text-amber-400" />
               ) : (
                 <Moon className="w-4 h-4 text-slate-700" />
               )}
             </button>
+
+            {/* Version Badge Button */}
+            {onTabChange && (
+              <button
+                onClick={() => onTabChange('versions')}
+                className={`min-h-[44px] flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm ${
+                  activeTab === 'versions'
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20'
+                    : 'bg-slate-900 hover:bg-slate-800 text-emerald-400 border-slate-800 hover:border-emerald-500/40'
+                }`}
+                title="Central de Versões & Novidades Operacionais do ViaNFe"
+              >
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="font-mono">v1.9</span>
+              </button>
+            )}
 
             {/* Current User Badge */}
             {currentUser && (

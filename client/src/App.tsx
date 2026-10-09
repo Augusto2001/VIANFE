@@ -18,6 +18,7 @@ import { BusinessSuccessDashboard } from './components/BusinessSuccessDashboard'
 import { ClientPortalView } from './components/ClientPortalView';
 import { TaxAuditView } from './components/TaxAuditView';
 import { SupportWidget } from './components/SupportWidget';
+import { VersionsView } from './components/VersionsView';
 
 export const App: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -178,6 +179,7 @@ export const App: React.FC = () => {
           selectedCompany={selectedCompany}
           onSelectCompany={handleSelectCompany}
           activeTab={activeTab}
+          onTabChange={setActiveTab}
           onQuickSync={handleQuickSync}
           isSyncing={isSyncing}
           onOpenNewCompanyModal={() => setIsCompanyModalOpen(true)}
@@ -258,6 +260,10 @@ export const App: React.FC = () => {
                 setActiveTab('dashboard');
               }}
             />
+          )}
+
+          {activeTab === 'versions' && (
+            <VersionsView />
           )}
 
         </main>
