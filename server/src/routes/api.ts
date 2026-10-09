@@ -61,6 +61,7 @@ router.post('/invoices/:id/sync-drive', verifyJwtAndTenant, invoiceController.sy
 router.post('/invoices/sync-company-drive', verifyJwtAndTenant, invoiceController.syncToDrive);
 router.post('/invoices/ingest-jl-comercio', verifyJwtAndTenant, invoiceController.ingestJlComercio);
 router.post('/invoices/reclassify', verifyJwtAndTenant, invoiceController.reclassifyAllInvoices);
+router.post('/invoices/sync-morning', verifyJwtAndTenant, invoiceController.syncMorningSales);
 
 // BPO Financeiro & Conciliação Bancária Lado a Lado
 router.get('/bpo/accounts', verifyJwtAndTenant, bpoController.getAccounts);

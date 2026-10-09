@@ -5,6 +5,7 @@ import { db } from '../database/db.js';
 import { sefazService } from '../services/sefazService.js';
 import { googleDriveService } from '../services/googleDriveService.js';
 import { predictiveAlertsService } from '../services/predictiveAlertsService.js';
+import { morningSalesSyncService } from '../services/morningSalesSyncService.js';
 
 export function initScheduler() {
   console.log('✓ [ROBÔ 24/7] Inicializando motor autônomo de sincronização SEFAZ e Google Drive...');
@@ -168,9 +169,21 @@ export function initScheduler() {
     runNfseMonthlyBatchSync('REPESCAGEM_DIA_03_06H00');
   }, { timezone: 'America/Sao_Paulo' });
 
+  // 6. Robô Matutino de Vendas / NFC-e (Diariamente às 06:00 AM - Horário de Brasília)
+  cron.schedule('0 6 * * *', () => {
+    morningSalesSyncService.runMorningBatchSync('MATUTINO_06H00').catch(e => console.error('[ROBÔ MATUTINO] Erro:', e.message));
+  }, { timezone: 'America/Sao_Paulo' });
+
+  // 7. Repescagem Matinal de Vendas / NFC-e (Diariamente às 07:30 AM - Horário de Brasília)
+  cron.schedule('30 7 * * *', () => {
+    morningSalesSyncService.runMorningBatchSync('REPESCAGEM_07H30').catch(e => console.error('[ROBÔ MATUTINO REPESCAGEM] Erro:', e.message));
+  }, { timezone: 'America/Sao_Paulo' });
+
   console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna e Mensal:');
   console.log('  └─ Varredura Madrugada 1: Diariamente às 01:15 AM (Brasília)');
   console.log('  └─ Varredura Madrugada 2: Diariamente às 02:30 AM (Brasília)');
+  console.log('  └─ Robô Matutino Vendas/NFC-e: Diariamente às 06:00 AM (Brasília)');
+  console.log('  └─ Repescagem Matinal Vendas/NFC-e: Diariamente às 07:30 AM (Brasília)');
   console.log('  └─ Backup Nuvem Drive: A cada 30 minutos (local para G:)');
   console.log('  └─ Radar Alertas Preditivos WhatsApp: Diariamente às 09:30 AM (Brasília)');
   console.log('  └─ Fechamento Mensal NFS-e: Dia 1º às 06:00 AM (Brasília)');

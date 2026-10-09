@@ -9,6 +9,7 @@ import { generateDanfePdf } from '../services/danfeGenerator.js';
 import { municipalDocument, originalNfsePdf } from '../services/nfse/originalDocuments.js';
 import { runJlComercioFullIngestion } from '../services/jlComercioIngestionService.js';
 import { reclassifyAndSanitizeDatabase } from '../utils/fiscalClassifier.js';
+import { morningSalesSyncService } from '../services/morningSalesSyncService.js';
 
 export const invoiceController = {
   /**
@@ -485,6 +486,24 @@ export const invoiceController = {
       });
     } catch (err: any) {
       console.error('Error in reclassifyAllInvoices:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  /**
+   * Dispara a esteira matinal autônoma de vendas (NFC-e / NF-e) e ingestão
+   */
+  async syncMorningSales(req: Request, res: Response) {
+    try {
+      const trigger = req.body?.triggerOrigin || 'MANUAL_API';
+      const result = await morningSalesSyncService.runMorningBatchSync(trigger);
+      return res.json({
+        success: result.success,
+        message: `Esteira matinal concluída: ${result.totalNewInvoices} novas notas ingeridas (Saídas: ${result.totalSaidas}, Entradas: ${result.totalEntradas}) em ${result.durationMs}ms.`,
+        data: result
+      });
+    } catch (err: any) {
+      console.error('Error in syncMorningSales:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   }
