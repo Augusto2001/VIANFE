@@ -20,7 +20,8 @@
 | **1.6** | 06/10/2026 | `a6a4d30` | **Sexto Ajuste:** Preservação estrita dos documentos de serviços originais da fonte municipal, bloqueio de preenchimento com dados presumidos e isolamento de recuperação. | Publicado | [1.6.md](1.6.md) |
 | **1.7** | 07/10/2026 | `23466e3` | **Sétimo Ajuste:** Preservação exata de centavos em tributos municipais (`fiscalDecimal.ts`) e inclusão das notas de serviços recuperadas na listagem geral. | Publicado | [1.7.md](1.7.md) |
 | **1.8** | 08/10/2026 | `5a97e48` | **Oitavo Ajuste:** Representação gráfica em PDF para NFS-e municipal e nacional (cStat 100/107), bloqueio de resumos e rotina externa de reconciliação de originais. | Publicado | [1.8.md](1.8.md) |
-| **1.9** | 09/10/2026 | `0871dcc` / `b45a094` | **Nono Ajuste:** Integração nativa do robô de busca e download de cupons fiscais **NFC-e (modelo 65)** direto dos servidores da **SEFAZ Virtual do RS (SVRS)** via mTLS do Certificado A1. | **Ativo em Produção** | [1.9.md](1.9.md) |
+| **1.9** | 09/10/2026 | `0871dcc` / `b45a094` | **Nono Ajuste:** Integração nativa do robô de busca e download de cupons fiscais **NFC-e (modelo 65)** direto dos servidores da **SEFAZ Virtual do RS (SVRS)** via mTLS do Certificado A1. | Publicado | [1.9.md](1.9.md) |
+| **1.10** | 23/10/2026 | `84a4e94` | **Décimo Ajuste:** Importador de Plano de Contas da Domínio Sistemas em layout de largura fixa (`Utilitários > Exportação > Contas`), inferência dinâmica de máscara por níveis hierárquicos e ingestão validada em produção (645 contas da RENDAVAN). | **Ativo em Produção** | [1.10.md](1.10.md) |
 
 ---
 

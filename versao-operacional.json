@@ -1,11 +1,12 @@
 {
-  "versao_operacional": "1.9",
+  "versao_operacional": "1.10",
   "revisao_documental": 1,
-  "inicio_da_serie": "2026-10-09",
-  "proposta": "Integração nativa do robô de busca e download de NFC-e (modelo 65) na SEFAZ Virtual do RS (SVRS)",
-  "commit_base_anterior": "5a97e4862564e34a201c38c17c81e2465c3e8e4a",
-  "estado": "publicado_com_homologacao_fiscal_pendente",
-  "documento": "docs/versoes/1.9.md",
+  "inicio_da_serie": "2026-10-23",
+  "proposta": "Importador de Plano de Contas Domínio em largura fixa com inferência de máscara hierárquica e ingestão BPO",
+  "commit_base_anterior": "432181c22cbf773d6bd3e98468e3e4f3cbd5b3f2",
+  "commit_publicado": "84a4e9410bf2f9ce457af9dcaba4befcc1fd5c44",
+  "estado": "publicado_e_validado_em_producao",
+  "documento": "docs/versoes/1.10.md",
   "workflow_id": "4Wn1e4VIXmBFUs0V",
   "workflow_versao_publicada": "0e3efb18-96a2-4769-a4fb-cf40436c957b"
 }
