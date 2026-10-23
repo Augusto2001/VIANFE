@@ -7,7 +7,7 @@ import { predictiveAlertsService } from '../services/predictiveAlertsService.js'
 import { openFinanceService } from '../services/openFinanceService.js';
 
 import { AuthenticatedRequest } from '../middleware/authMiddleware.js';
-import { isReadableFinancialText, reconciliationSummary } from '../services/bpoValidation.js';
+import { isReadableFinancialText, parseDominioFixedChart, reconciliationSummary } from '../services/bpoValidation.js';
 
 function canAccessCompany(req: Request, res: Response, companyId: unknown): boolean {
   const user = (req as AuthenticatedRequest).user;
@@ -669,17 +669,20 @@ export const bpoController = {
         res.status(400).json({ error: 'Plano inválido: envie TXT/CSV legível exportado pelo Domínio. PDF ou conteúdo binário não é aceito aqui.' }); return;
       }
       const parsedAccounts: any[][] = [];
-      const lines = raw_content.split(/\r?\n/).map((l: string) => l.trim()).filter((l: string) => l.length > 0);
+      // trimEnd: no layout de largura fixa do Domínio a posição de cada campo depende do início da linha
+      const lines = raw_content.split(/\r?\n/).map((l: string) => l.trimEnd()).filter((l: string) => l.trim().length > 0);
       let imported = 0;
+      const fixa = parseDominioFixedChart(lines);
+      if (fixa) parsedAccounts.push(...fixa);
 
       const insertStmt = db.prepare(`
         INSERT INTO dominio_chart_of_accounts (id, company_id, codigo_conta, classificacao, nome_conta, tipo_conta, natureza, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `);
 
-      for (let line of lines) {
+      for (let line of fixa ? [] : lines) {
         // Remove aspas nas extremidades de cada token
-        line = line.replace(/^["]|["]$/g, '');
+        line = line.trim().replace(/^["]|["]$/g, '');
 
         // Ignora linhas de controle, traços e cabeçalhos
         if (line.startsWith('---') || line.startsWith('===') || line.startsWith('___')) continue;
