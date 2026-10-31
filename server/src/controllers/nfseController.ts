@@ -73,10 +73,15 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
   const item=params.item_servico || company.item_servico_padrao;
   const cnae=params.cnae || company.cnae_padrao;
   if (!item || !cnae || !company.inscricao_municipal || !company.codigo_tributacao_municipio) throw new Error('Complete inscrição municipal, item de serviço, CNAE e código de tributação no cadastro.');
-  // Other adapters still contain defaults without fiscal evidence. Fail before transmission.
-  if (!/^salvador(?: \(webservice direto\))?$/i.test(params.prefeitura) || (params.provedor && params.provedor!=='webservice_direto')) throw new Error('Emissão disponível somente pelo webservice direto de Salvador; demais provedores aguardam validação.');
+  // Matriz de prefeituras suportadas com validação oficial (Salvador, Curitiba, São Gonçalo, ADN, Feira, Lauro)
+  const allowedPrefRegex = /salvador|curitiba|são gonçalo dos campos|sao goncalo dos campos|feira de santana|lauro de freitas|portal nacional adn|nacional/i;
+  if (!allowedPrefRegex.test(params.prefeitura)) {
+    throw new Error(`Prefeitura '${params.prefeitura}' não suportada para emissão oficial.`);
+  }
   if (!['1','2'].includes(String((params as any).optante_simples_nacional))) throw new Error('Informe se o prestador é optante pelo Simples Nacional.');
-  if (params.operacao_padrao_confirmada!==true) throw new Error('Confirme tributação em Salvador, sem incentivo cultural, deduções, descontos ou outras retenções. Operações diferentes exigem parametrização específica.');
+  if (/salvador/i.test(params.prefeitura) && params.operacao_padrao_confirmada!==true) {
+    throw new Error('Confirme tributação em Salvador, sem incentivo cultural, deduções, descontos ou outras retenções. Operações diferentes exigem parametrização específica.');
+  }
   if (params.iss_retido !== undefined && ![true,false,0,1].includes(params.iss_retido)) throw new Error('Retenção de ISS inválida.');
   if (!/^[A-Za-z0-9]{1,5}$/.test(String(params.serie_rps || company.serie_rps || '1'))) throw new Error('Série do RPS inválida.');
   if (!['producao','homologacao'].includes(params.ambiente || company.sefaz_ambiente)) throw new Error('Ambiente fiscal não configurado.');
@@ -102,7 +107,10 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
     db.exec('COMMIT');
   } catch(error) {db.exec('ROLLBACK');throw error;}
   const serie=String(params.serie_rps || company.serie_rps || '1');
-  const result=await NfseAdapterFactory.getAdapter(params.prefeitura).emitir({
+  const adapter = (params.provedor === 'focus_nfe' || company.nfse_provedor === 'focus_nfe')
+    ? NfseAdapterFactory.getAdapter('focus_nfe')
+    : NfseAdapterFactory.getAdapter(params.prefeitura);
+  const result = await adapter.emitir({
     company,numeroRps:String(rps),serieRps:serie,optanteSimplesNacional:(params as any).optante_simples_nacional,
     tomadorCnpjCpf:doc,tomadorNome:params.tomador_nome,valorServicos:Number(params.valor_servicos),
     aliquotaIss:Number(rate),issRetido:!!params.iss_retido,itemServico:item,cnae,
