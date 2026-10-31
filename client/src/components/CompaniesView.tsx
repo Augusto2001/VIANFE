@@ -6,7 +6,8 @@ import {
   Plus, 
   Search, 
   Edit, 
-  Trash2, 
+  Power,
+  PowerOff, 
   Shield, 
   Key, 
   HardDrive, 
@@ -198,15 +199,39 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
     onCloseModal();
   };
 
-  const handleDeleteCompany = async (comp: Company) => {
-    if (!window.confirm(`Tem certeza que deseja excluir a empresa ${comp.razao_social}? Todas as notas fiscais e configurações associadas serão apagadas.`)) {
+  // Trava de Alçada Master da Diretoria: Augusto e Val
+  const isMaster = Boolean(
+    currentUser && (
+      currentUser.role === 'admin' ||
+      currentUser.role === 'master' ||
+      currentUser.id === 'usr_admin_viacont_master'
+    ) && (
+      (currentUser.email && (
+        currentUser.email.toLowerCase().includes('augusto') ||
+        currentUser.email.toLowerCase().includes('val')
+      )) ||
+      (currentUser.name && (
+        currentUser.name.toLowerCase().includes('augusto') ||
+        currentUser.name.toLowerCase().includes('val')
+      )) ||
+      currentUser.id === 'usr_admin_viacont_master'
+    )
+  );
+
+  const handleToggleStatus = async (comp: Company) => {
+    const isCurrentlyInactive = comp.status === 'inativo';
+    const newStatus = isCurrentlyInactive ? 'ativo' : 'inativo';
+    const actionLabel = isCurrentlyInactive ? 'reativar' : 'desativar';
+
+    if (!window.confirm(`Confirma ${actionLabel} a empresa ${comp.razao_social}? O histórico contábil, notas fiscais e certificados permanecem 100% preservados no sistema.`)) {
       return;
     }
+
     try {
-      await api.deleteCompany(comp.id);
+      await api.updateCompany(comp.id, { status: newStatus });
       onRefresh();
     } catch (err: any) {
-      alert(`Erro ao excluir: ${err.message}`);
+      alert(`Erro ao alterar status da empresa: ${err.message}`);
     }
   };
 
@@ -305,9 +330,16 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
                   
                   {/* Top line: Status and Badge */}
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-brand-500/10 text-brand-400 border border-brand-500/20">
-                      UF: {comp.uf}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                        UF: {comp.uf}
+                      </span>
+                      {comp.status === 'inativo' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                          Inativo
+                        </span>
+                      )}
+                    </div>
                     
                     <div className="flex items-center gap-1.5">
                       {comp.cert_filename ? (
@@ -391,13 +423,19 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
                       <Edit className="w-4 h-4 text-brand-400" />
                     </button>
 
-                    <button
-                      onClick={() => handleDeleteCompany(comp)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
-                      title="Excluir Empresa"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {isMaster && (
+                      <button
+                        onClick={() => handleToggleStatus(comp)}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          comp.status === 'inativo'
+                            ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10'
+                            : 'text-slate-400 hover:text-amber-400 hover:bg-amber-500/10'
+                        }`}
+                        title={comp.status === 'inativo' ? "Reativar Empresa (Alçada Master: Augusto e Val)" : "Desativar Empresa (Alçada Master: Augusto e Val)"}
+                      >
+                        {comp.status === 'inativo' ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
+                      </button>
+                    )}
                   </div>
                 </div>
 

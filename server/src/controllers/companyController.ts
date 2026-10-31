@@ -249,26 +249,11 @@ export const companyController = {
    * Delete client company
    */
   async delete(req: Request, res: Response) {
-    try {
-      const id = String(req.params.id);
-      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as any;
-      if (!company) {
-        return res.status(404).json({ success: false, message: 'Empresa não encontrada.' });
-      }
-
-      // Delete certificate file if exists
-      if (company.cert_filename) {
-        const certPath = path.join(CERTS_DIR, company.cert_filename);
-        if (fs.existsSync(certPath)) {
-          fs.unlinkSync(certPath);
-        }
-      }
-
-      db.prepare('DELETE FROM companies WHERE id = ?').run(id);
-      return res.json({ success: true, message: `Empresa ${company.razao_social} excluída com sucesso.` });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
+    // Regra de Governança Fiscal Viacont: Proibida exclusão de empresas para resguardo do histórico fiscal
+    return res.status(403).json({
+      success: false,
+      message: 'A exclusão definitiva de empresas está desativada pela governança fiscal da Viacont para resguardar o acervo probatório de notas e escriturações. Utilize a funcionalidade de desativação (alçada restrita aos Diretores Augusto e Val).'
+    });
   },
 
   /**

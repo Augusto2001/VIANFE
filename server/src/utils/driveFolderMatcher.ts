@@ -21,6 +21,49 @@ export const KNOWN_FOLDER_ALIASES: FolderAliasMapping[] = [
       'LEANDRO GOMES NOGUEIRA'
     ],
     folderName: 'LEANDRO GOMES NOGUEIRA (C)-26 (SN) ( 42 )'
+  },
+  {
+    cnpj: '13549736000165',
+    aliases: [
+      'FARMACIA PRECO BOM',
+      'FARMACIA PREÇO BOM',
+      'FRANK DANILO'
+    ],
+    folderName: 'FARMACIA PREÇO BOM (FRANK DANILO) (SN) ( 26 )'
+  },
+  {
+    cnpj: '42597616000131',
+    aliases: [
+      'RWM',
+      'RWM FARMACIA',
+      'RWM FARMÁCIA PREÇO CERTO',
+      'RWM COMERCIO DE MEDICAMENTOS'
+    ],
+    folderName: 'RWM FARMÁCIA PREÇO CERTO (SN) ( 68 )'
+  },
+  {
+    cnpj: '54536662000100',
+    aliases: [
+      'FARMACIA DIAS QUEIROZ',
+      'DIAS QUEIROZ'
+    ],
+    folderName: 'FARMACIA DIAS QUEIROZ (SN) ( 25 )'
+  },
+  {
+    cnpj: '50650733000140',
+    aliases: [
+      'PETCHIC',
+      'PETCHIC SAO GONCALO'
+    ],
+    folderName: 'PETCHIC (SN) ( 59 )'
+  },
+  {
+    cnpj: '51090446000195',
+    aliases: [
+      'CHURRASCARIA TRADICAO',
+      'CHURRASCARIA TRADICAO GAUCHA'
+    ],
+    folderName: 'CHURRASCARIA TRADIÇÃO LTDA (SN) ( 13 )'
   }
 ];
 

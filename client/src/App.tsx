@@ -239,6 +239,7 @@ export const App: React.FC = () => {
               isModalOpen={isCompanyModalOpen}
               onCloseModal={() => setIsCompanyModalOpen(false)}
               onOpenModal={() => setIsCompanyModalOpen(true)}
+              currentUser={currentUser}
             />
           )}
 
