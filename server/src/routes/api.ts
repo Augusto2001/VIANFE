@@ -1,3 +1,6 @@
+import { integrationVaultService } from '../services/integrationVaultService.js';
+import { hiperSyncWorker } from '../services/hiperSyncWorker.js';
+import { contaAzulWorker } from '../services/contaAzulWorker.js';
 import { nfseAccess } from '../middleware/nfseAccess.js';
 import { Router } from 'express';
 import multer from 'multer';
@@ -208,6 +211,54 @@ router.post('/settings/captcha-key', verifyJwtAndTenant, (req, res) => {
     res.json({ success: true, message: 'Chave 2Captcha salva com sucesso!' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+// ==========================================
+// INTEGRAÇÕES & ROBÔS HEADLESS (Hiper & Conta Azul)
+// ==========================================
+router.get('/integrations', verifyJwtAndTenant, requireAdmin, (req, res) => {
+  try {
+    const list = integrationVaultService.listIntegrations();
+    res.json({ success: true, integrations: list });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/integrations/credentials', verifyJwtAndTenant, requireAdmin, (req, res) => {
+  try {
+    const { platform, username, password, extra } = req.body;
+    if (!platform || !username || !password) {
+      return res.status(400).json({ success: false, error: 'Plataforma, usuário e senha são obrigatórios.' });
+    }
+    const cred = integrationVaultService.saveCredential(platform, username, password, extra || {});
+    res.json({
+      success: true,
+      message: `Credencial de ${platform} salva com sucesso no cofre seguro!`,
+      credential: { id: cred.id, platform: cred.platform, username: cred.username, status: cred.status }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/integrations/test-hiper', verifyJwtAndTenant, requireAdmin, async (req, res) => {
+  try {
+    const result = await hiperSyncWorker.testAuthentication();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/integrations/test-conta-azul', verifyJwtAndTenant, requireAdmin, async (req, res) => {
+  try {
+    const result = await contaAzulWorker.testAuthentication();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

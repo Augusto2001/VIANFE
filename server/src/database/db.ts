@@ -95,6 +95,24 @@ export function initDatabase() {
       FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
     );
 
+    -- COFRE DE INTEGRAÇÕES & ROBÔS: Hiper Contador, Conta Azul, Pluggy Open Finance
+    CREATE TABLE IF NOT EXISTS integration_credentials (
+      id TEXT PRIMARY KEY,
+      platform TEXT NOT NULL, -- 'hiper' | 'conta_azul' | 'pluggy'
+      tenant_id TEXT DEFAULT 'tenant_viacont_master',
+      username TEXT NOT NULL,
+      password_enc TEXT NOT NULL,
+      extra_json TEXT, -- cookies, tokens de sessão, parâmetros adicionais
+      status TEXT DEFAULT 'ativo', -- 'ativo' | 'erro_auth' | 'pausado'
+      last_sync_at TEXT,
+      last_sync_status TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_integration_platform ON integration_credentials(platform, tenant_id);
+
     CREATE INDEX IF NOT EXISTS idx_invoices_company_date ON invoices(company_id, data_emissao);
     CREATE INDEX IF NOT EXISTS idx_invoices_chave ON invoices(chave_acesso);
     CREATE INDEX IF NOT EXISTS idx_invoices_tipo ON invoices(company_id, tipo);
