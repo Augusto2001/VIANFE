@@ -46,3 +46,4 @@ server/storage/browser_profiles/
 server/storage/downloads/
 server/scripts/*.mjs
 server/test_*.mjs
+server/scripts/sync_delta.json

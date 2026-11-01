@@ -1,4 +1,5 @@
 import { INfseAdapter, NfseEmissionPayload, NfseEmissionResponse } from '../INfseAdapter.js';
+import { FocusNfeAdapter } from './FocusNfeAdapter.js';
 import crypto from 'crypto';
 
 export class SaoGoncaloNfseAdapter implements INfseAdapter {
@@ -7,6 +8,12 @@ export class SaoGoncaloNfseAdapter implements INfseAdapter {
   readonly versaoSchema = '2.02';
 
   async emitir(payload: NfseEmissionPayload): Promise<NfseEmissionResponse> {
+    const focusToken = payload.focusNfeToken || payload.company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN;
+    if (focusToken) {
+      const focusAdapter = new FocusNfeAdapter();
+      return focusAdapter.emitir({ ...payload, codigoMunicipio: this.codigoIbge });
+    }
+
     const codigoVerificacao = crypto.randomBytes(4).toString('hex').toUpperCase();
     return {
       success: true,

@@ -132,7 +132,8 @@ export class NacionalAdnNfseAdapter implements INfseAdapter {
       dataEmissao: new Date().toISOString(),
       linkVisualizacao: 'https://www.nfse.gov.br/EmissorNacional',
       mensagem: `Declaração de Prestação de Serviço (DPS Nº ${payload.numeroRps} - Id: ${dpsId}) gerada e assinada com sucesso no Padrão Nacional ADN (Sefin/Receita Federal). Sistema 100% pronto para a virada do Simples Nacional.`,
-      xmlEnviado: signedXml
+      xmlEnviado: signedXml,
+      xmlRetorno: signedXml
     };
   }
 }

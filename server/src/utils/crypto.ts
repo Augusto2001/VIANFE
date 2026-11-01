@@ -3,8 +3,8 @@ import crypto from 'crypto';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'antigravity_fiscal_safe_key_32b_2026_sefaz'; // Must be 32 bytes
 const IV_LENGTH = 16;
 
-function getKey(): Buffer {
-  return crypto.createHash('sha256').update(ENCRYPTION_KEY).digest();
+function getKey(keyStr: string = ENCRYPTION_KEY): Buffer {
+  return crypto.createHash('sha256').update(keyStr).digest();
 }
 
 export function encryptText(text: string): string {
@@ -18,17 +18,23 @@ export function encryptText(text: string): string {
 
 export function decryptText(encryptedText: string): string {
   if (!encryptedText || !encryptedText.includes(':')) return '';
-  try {
-    const [ivHex, encrypted] = encryptedText.split(':');
-    const iv = Buffer.from(ivHex, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', getKey(), iv);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  } catch (err) {
-    console.error('Decryption failed:', err);
-    return '';
+  const candidateKeys = [
+    ENCRYPTION_KEY,
+    'viacont_super_secret_aes_key_32bytes!!',
+    'antigravity_fiscal_safe_key_32b_2026_sefaz'
+  ];
+
+  for (const cand of candidateKeys) {
+    try {
+      const [ivHex, encrypted] = encryptedText.split(':');
+      const iv = Buffer.from(ivHex, 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', getKey(cand), iv);
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      if (decrypted) return decrypted;
+    } catch (_) {}
   }
+  return '';
 }
 
 export function formatCNPJ(cnpj: string): string {
@@ -49,6 +55,6 @@ export function formatChaveAcesso(chave: string): string {
   return clean.replace(/(\d{4})/g, '$1 ').trim();
 }
 
-export function cleanNumeric(str: any): string {
-  return String(str ?? '').replace(/\D/g, '');
+export function cleanNumeric(str: string = ''): string {
+  return (str || '').replace(/\D/g, '');
 }

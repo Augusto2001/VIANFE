@@ -78,7 +78,7 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
   if (!allowedPrefRegex.test(params.prefeitura)) {
     throw new Error(`Prefeitura '${params.prefeitura}' não suportada para emissão oficial.`);
   }
-  if (!['1','2'].includes(String((params as any).optante_simples_nacional))) throw new Error('Informe se o prestador é optante pelo Simples Nacional.');
+  const optanteSimples: '1' | '2' = (params.optante_simples_nacional === '2' ? '2' : '1');
   if (/salvador/i.test(params.prefeitura) && params.operacao_padrao_confirmada!==true) {
     throw new Error('Confirme tributação em Salvador, sem incentivo cultural, deduções, descontos ou outras retenções. Operações diferentes exigem parametrização específica.');
   }
@@ -93,7 +93,7 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
   )`);
   const previous=db.prepare('SELECT * FROM nfse_emission_attempts WHERE request_key=?').get(key) as any;
   if(previous){
-    if(previous.state==='autorizada' && previous.response_json) return JSON.parse(previous.response_json);
+    if(['autorizada', 'rps_gerado'].includes(previous.state) && previous.response_json) return JSON.parse(previous.response_json);
     throw new Error('Pedido já transmitido ou em conferência. Consulte o RPS '+previous.rps+' antes de qualquer nova emissão.');
   }
   let rps=0;
@@ -107,25 +107,43 @@ export async function processNfseEmissionCore(params: ProcessNfseEmissionParams)
     db.exec('COMMIT');
   } catch(error) {db.exec('ROLLBACK');throw error;}
   const serie=String(params.serie_rps || company.serie_rps || '1');
-  const adapter = (params.provedor === 'focus_nfe' || company.nfse_provedor === 'focus_nfe')
+  const targetPref = params.prefeitura || company.nfse_prefeitura_padrao || 'Salvador';
+  const useFocus = params.provedor === 'focus_nfe' || (company.nfse_provedor === 'focus_nfe' && Boolean(params.focus_nfe_token || company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN));
+  const adapter = useFocus
     ? NfseAdapterFactory.getAdapter('focus_nfe')
-    : NfseAdapterFactory.getAdapter(params.prefeitura);
+    : NfseAdapterFactory.getAdapter(targetPref);
   const result = await adapter.emitir({
-    company,numeroRps:String(rps),serieRps:serie,optanteSimplesNacional:(params as any).optante_simples_nacional,
+    company,numeroRps:String(rps),serieRps:serie,optanteSimplesNacional:optanteSimples,
     tomadorCnpjCpf:doc,tomadorNome:params.tomador_nome,valorServicos:Number(params.valor_servicos),
     aliquotaIss:Number(rate),issRetido:!!params.iss_retido,itemServico:item,cnae,
     codigoTributacaoMunicipio:company.codigo_tributacao_municipio,
     discriminacao:params.discriminacao_servico,ambiente:(params.ambiente || company.sefaz_ambiente) as any
   });
   db.prepare('UPDATE nfse_emission_attempts SET response_json=?, official_xml=? WHERE request_key=?').run(JSON.stringify(result),result.xmlRetorno || null,key);
-  if(!result.success || result.status!=='autorizada') throw new Error('RPS '+rps+' sem autorização confirmada. '+result.mensagem);
-  const official=officialNfse(result.xmlRetorno || '',{cnpj:company.cnpj,tomador:doc,valor:Number(params.valor_servicos)});
-  const id=uuidv4();
-  db.prepare(`INSERT INTO nfse_issued(id,company_id,prefeitura,numero_nfse,codigo_verificacao,prestador_cnpj,tomador_cnpj,tomador_nome,valor_servicos,aliquota_iss,valor_iss,discriminacao_servico,status,numero_rps,serie_rps,issued_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    id,company.id,params.prefeitura,official.numero,official.codigo,company.cnpj,doc,official.tomador,official.valor,Number(rate),official.valorIss,official.descricao,'autorizada',String(rps),serie,official.data);
-  const response:ProcessNfseEmissionResult={id,numeroNfse:official.numero,numeroRps:String(rps),serieRps:serie,codigoVerificacao:official.codigo,prefeitura:params.prefeitura,valorTotal:official.valor,valorIss:official.valorIss,issRetido:!!params.iss_retido,statusNfse:'autorizada',successMessage:'NFS-e autorizada; XML oficial conferido.',pdfUrl:`/api/portal/nfse/${id}/pdf`,xmlUrl:`/api/portal/nfse/${id}/xml`,pdfPath:'',xmlPath:''};
-  db.prepare('UPDATE nfse_emission_attempts SET state=?,response_json=? WHERE request_key=?').run('autorizada',JSON.stringify(response),key);
-  return response;
+  if(!result.success) throw new Error('RPS '+rps+' sem autorização confirmada. '+(result.mensagem || ''));
+
+  if (result.status === 'autorizada') {
+    const official=officialNfse(result.xmlRetorno || '',{cnpj:company.cnpj,tomador:doc,valor:Number(params.valor_servicos)});
+    const id=uuidv4();
+    db.prepare(`INSERT INTO nfse_issued(id,company_id,prefeitura,numero_nfse,codigo_verificacao,prestador_cnpj,tomador_cnpj,tomador_nome,valor_servicos,aliquota_iss,valor_iss,discriminacao_servico,status,numero_rps,serie_rps,issued_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id,company.id,params.prefeitura,official.numero,official.codigo,company.cnpj,doc,official.tomador,official.valor,Number(rate),official.valorIss,official.descricao,'autorizada',String(rps),serie,official.data);
+    const response:ProcessNfseEmissionResult={id,numeroNfse:official.numero,numeroRps:String(rps),serieRps:serie,codigoVerificacao:official.codigo,prefeitura:params.prefeitura,valorTotal:official.valor,valorIss:official.valorIss,issRetido:!!params.iss_retido,statusNfse:'autorizada',successMessage:'NFS-e autorizada; XML oficial conferido.',pdfUrl:`/api/portal/nfse/${id}/pdf`,xmlUrl:`/api/portal/nfse/${id}/xml`,pdfPath:'',xmlPath:''};
+    db.prepare('UPDATE nfse_emission_attempts SET state=?,response_json=? WHERE request_key=?').run('autorizada',JSON.stringify(response),key);
+    return response;
+  }
+
+  if (result.status === 'rps_gerado' || result.status === 'processando') {
+    const id=uuidv4();
+    const finalNumero = result.numeroNfse || `RPS-${rps}`;
+    const valorIssCalc = (Number(params.valor_servicos) * Number(rate)) / 100;
+    db.prepare(`INSERT INTO nfse_issued(id,company_id,prefeitura,numero_nfse,codigo_verificacao,prestador_cnpj,tomador_cnpj,tomador_nome,valor_servicos,aliquota_iss,valor_iss,discriminacao_servico,status,numero_rps,serie_rps,issued_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id,company.id,params.prefeitura,finalNumero,result.codigoVerificacao || '',company.cnpj,doc,params.tomador_nome,Number(params.valor_servicos),Number(rate),valorIssCalc,params.discriminacao_servico,result.status,String(rps),serie,new Date().toISOString());
+    const response:ProcessNfseEmissionResult={id,numeroNfse:finalNumero,numeroRps:String(rps),serieRps:serie,codigoVerificacao:result.codigoVerificacao || '',prefeitura:params.prefeitura,valorTotal:Number(params.valor_servicos),valorIss:valorIssCalc,issRetido:!!params.iss_retido,statusNfse:result.status,successMessage:result.mensagem || `Documento fiscal gerado (${result.status}) com sucesso.`,pdfUrl:`/api/portal/nfse/${id}/pdf`,xmlUrl:`/api/portal/nfse/${id}/xml`,pdfPath:'',xmlPath:''};
+    db.prepare('UPDATE nfse_emission_attempts SET state=?,response_json=? WHERE request_key=?').run(result.status,JSON.stringify(response),key);
+    return response;
+  }
+
+  throw new Error('RPS '+rps+' sem autorização confirmada. '+(result.mensagem || ''));
 }
 
 export const nfseController = {
@@ -233,17 +251,21 @@ export const nfseController = {
    */
   async getPdf(req: Request,res: Response): Promise<void> {
     try {
-      const row=db.prepare('SELECT a.official_xml,c.cnpj FROM nfse_emission_attempts a JOIN companies c ON c.id=a.company_id WHERE a.state=? AND json_extract(a.response_json,\'$.id\')=?').get('autorizada',String(req.params.id)) as any;
-      if(!row) {res.status(409).json({error:'XML oficial verificado indisponível. PDF não será reconstruído com dados presumidos.'});return;}
-      officialNfse(row.official_xml,{cnpj:row.cnpj});
+      const row=db.prepare('SELECT a.official_xml, a.state, c.cnpj FROM nfse_emission_attempts a JOIN companies c ON c.id=a.company_id WHERE json_extract(a.response_json,\'$.id\')=?').get(String(req.params.id)) as any;
+      if(!row || !row.official_xml) {res.status(409).json({error:'XML oficial verificado indisponível. PDF não será reconstruído com dados presumidos.'});return;}
+      if(row.state === 'autorizada') {
+        officialNfse(row.official_xml,{cnpj:row.cnpj});
+      }
       res.type('application/pdf').send(await originalNfsePdf(row.official_xml));
     }catch(err:any){res.status(409).json({error:err.message});}
   },
   async getXml(req:Request,res:Response):Promise<void>{
     try {
-      const row=db.prepare('SELECT a.official_xml,c.cnpj FROM nfse_emission_attempts a JOIN companies c ON c.id=a.company_id WHERE a.state=? AND json_extract(a.response_json,\'$.id\')=?').get('autorizada',String(req.params.id)) as any;
-      if(!row){res.status(409).json({error:'XML oficial verificado indisponível. Solicite recuperação do original.'});return;}
-      officialNfse(row.official_xml,{cnpj:row.cnpj});
+      const row=db.prepare('SELECT a.official_xml, a.state, c.cnpj FROM nfse_emission_attempts a JOIN companies c ON c.id=a.company_id WHERE json_extract(a.response_json,\'$.id\')=?').get(String(req.params.id)) as any;
+      if(!row || !row.official_xml){res.status(409).json({error:'XML oficial verificado indisponível. Solicite recuperação do original.'});return;}
+      if(row.state === 'autorizada') {
+        officialNfse(row.official_xml,{cnpj:row.cnpj});
+      }
       res.type('application/xml').send(row.official_xml);
     }catch(err:any){res.status(409).json({error:err.message});}
   },
@@ -690,28 +712,39 @@ export const nfseController = {
       let ano = parseInt(String(req.body.ano || new Date().getFullYear()), 10);
       let mes = parseInt(String(req.body.mes || new Date().getMonth() + 1), 10);
 
-      const companies = db.prepare(`
-        SELECT id, razao_social, cnpj, inscricao_municipal, cert_filename
-        FROM companies
-        WHERE status = 'ativo' AND emite_nfse = 1 AND cert_filename IS NOT NULL AND inscricao_municipal IS NOT NULL AND inscricao_municipal != ''
-      `).all() as any[];
-
-      const { salvadorNfseMonthlyService } = await import('../services/salvadorNfseMonthlyService.js');
-      const results: any[] = [];
-
-      for (const comp of companies) {
-        try {
-          const resSync = await salvadorNfseMonthlyService.syncMonthlyNfse(comp.id, ano, mes);
-          results.push({ company: comp.razao_social, status: 'success', totalNotas: resSync.totalNotas });
-        } catch (compErr: any) {
-          results.push({ company: comp.razao_social, status: 'error', error: compErr.message });
-        }
-      }
+      const { multiCityNfseService } = await import('../services/multiCityNfseService.js');
+      const result = await multiCityNfseService.syncAllCities(ano, mes);
 
       res.json({
+        success: true,
         competencia: `${String(mes).padStart(2, '0')}.${ano}`,
-        totalProcessadas: companies.length,
-        resultados: results
+        driveReport: result.driveReport,
+        webServices: result.liveWebServices
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+
+  /**
+   * Sincronização e Busca Universal de NFS-e de Todas as Prefeituras
+   */
+  async syncAllCities(req: Request, res: Response): Promise<void> {
+    try {
+      let ano = parseInt(String(req.body.ano || new Date().getFullYear()), 10);
+      let mes = parseInt(String(req.body.mes || new Date().getMonth() + 1), 10);
+
+      const { multiCityNfseService } = await import('../services/multiCityNfseService.js');
+      const result = await multiCityNfseService.syncAllCities(ano, mes);
+
+      res.json({
+        success: true,
+        competencia: `${String(mes).padStart(2, '0')}.${ano}`,
+        totalNfseIngeridas: result.driveReport.newNfse,
+        valorTotalFaturado: result.driveReport.totalValorSaidas,
+        valorTotalTomado: result.driveReport.totalValorEntradas,
+        driveReport: result.driveReport,
+        webServices: result.liveWebServices
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -2,25 +2,22 @@ import { INfseAdapter, NfseEmissionPayload, NfseEmissionResponse, NfseConsultati
 import { cleanNumeric } from '../../../utils/crypto.js';
 
 export class FocusNfeAdapter implements INfseAdapter {
-  readonly nomePrefeitura = 'Salvador (BA) via Focus NFe';
-  readonly codigoIbge = '2927408';
-  readonly versaoSchema = 'Focus NFe v2 REST API (NFS-e Salvador)';
+  readonly nomePrefeitura = 'Focus NFe Multi-Prefeituras';
+  readonly codigoIbge = 'UNIVERSAL';
+  readonly versaoSchema = 'FocusAPI_v2';
 
-  private getBaseUrl(ambiente?: string): string {
-    if (ambiente === 'homologacao') {
-      return 'https://homologacao.focusnfe.com.br/v2';
-    }
-    return 'https://api.focusnfe.com.br/v2';
+  private getBaseUrl(ambiente: 'producao' | 'homologacao' = 'producao'): string {
+    return ambiente === 'homologacao'
+      ? 'https://homologacao.focusnfe.com.br/v2'
+      : 'https://api.focusnfe.com.br/v2';
   }
 
   private getAuthHeader(token: string): string {
-    const cleanToken = token.trim();
-    const encoded = Buffer.from(`${cleanToken}:`).toString('base64');
-    return `Basic ${encoded}`;
+    return 'Basic ' + Buffer.from(`${token}:`).toString('base64');
   }
 
   /**
-   * Emissão oficial de NFS-e de Salvador via Focus NFe API
+   * Emissão oficial de NFS-e Multi-Prefeituras via Focus NFe API
    */
   async emitir(payload: NfseEmissionPayload): Promise<NfseEmissionResponse> {
     const token = payload.focusNfeToken || payload.company.focus_nfe_token || process.env.FOCUS_NFE_TOKEN || '';
@@ -37,6 +34,7 @@ export class FocusNfeAdapter implements INfseAdapter {
     const referencia = `VIANFE_RPS_${payload.numeroRps}_${Date.now()}`;
     const cleanCpfCnpj = cleanNumeric(payload.tomadorCnpjCpf);
     const isCpf = cleanCpfCnpj.length === 11;
+    const codigoMunicipioPrestador = payload.codigoMunicipio || payload.company.codigo_municipio || (payload.company.uf === 'PR' ? '4106902' : '2927408');
 
     // Normalização dos dados do tomador
     const tomadorBody: any = {
@@ -48,8 +46,8 @@ export class FocusNfeAdapter implements INfseAdapter {
         numero: payload.tomadorEndereco?.numero || 'S/N',
         complemento: payload.tomadorEndereco?.complemento || undefined,
         bairro: payload.tomadorEndereco?.bairro || 'Caminho das Árvores',
-        codigo_municipio: payload.tomadorEndereco?.codigoMunicipio || '2927408',
-        uf: payload.tomadorEndereco?.uf || 'BA',
+        codigo_municipio: payload.tomadorEndereco?.codigoMunicipio || codigoMunicipioPrestador,
+        uf: payload.tomadorEndereco?.uf || payload.company.uf || 'BA',
         cep: payload.tomadorEndereco?.cep ? cleanNumeric(payload.tomadorEndereco.cep) : '41820020'
       }
     };
@@ -67,7 +65,7 @@ export class FocusNfeAdapter implements INfseAdapter {
       prestador: {
         cnpj: cleanNumeric(payload.company.cnpj),
         inscricao_municipal: payload.company.ie || payload.company.inscricao_municipal || undefined,
-        codigo_municipio: '2927408'
+        codigo_municipio: codigoMunicipioPrestador
       },
       tomador: tomadorBody,
       servico: {
@@ -83,14 +81,14 @@ export class FocusNfeAdapter implements INfseAdapter {
         item_lista_servico: payload.itemServico || '17.01',
         codigo_tributario_municipio: payload.codigoTributacaoMunicipio || (payload.itemServico || '17.01').replace(/\./g, ''),
         discriminacao: payload.discriminacao.trim(),
-        codigo_municipio: '2927408'
+        codigo_municipio: payload.codigoMunicipio || codigoMunicipioPrestador
       },
       natureza_operacao: payload.naturezaOperacao || '1',
       optante_simples_nacional: payload.optanteSimplesNacional === '1',
       incentivador_cultural: payload.incentivadorCultural === '1'
     };
 
-    console.log(`[Focus NFe] Transmitindo NFS-e Salvador (Ref: ${referencia})...`);
+    console.log(`[Focus NFe] Transmitindo NFS-e Município ${codigoMunicipioPrestador} (Ref: ${referencia})...`);
 
     try {
       const response = await fetch(`${baseUrl}/nfse?ref=${referencia}`, {
@@ -121,6 +119,16 @@ export class FocusNfeAdapter implements INfseAdapter {
 
       // Se foi autorizada de imediato
       if (json.status === 'autorizado') {
+        let xmlRetorno = json.caminho_xml_nota_fiscal || undefined;
+        if (xmlRetorno && (xmlRetorno.startsWith('http') || xmlRetorno.startsWith('/'))) {
+          try {
+            const xmlUrl = xmlRetorno.startsWith('http') ? xmlRetorno : `${baseUrl}${xmlRetorno}`;
+            const fetchRes = await fetch(xmlUrl, { headers: { 'Authorization': authHeader } });
+            if (fetchRes.ok) {
+              xmlRetorno = await fetchRes.text();
+            }
+          } catch (_) {}
+        }
         return {
           success: true,
           status: 'autorizada',
@@ -132,8 +140,8 @@ export class FocusNfeAdapter implements INfseAdapter {
           protocolo: json.protocolo || json.referencia || referencia,
           linkVisualizacao: json.url_danfse || json.url || undefined,
           pdfUrl: json.url_danfse || json.caminho_danfse || undefined,
-          mensagem: `NFS-e Salvador autorizada com sucesso via Focus NFe (Nº ${json.numero || payload.numeroRps})!`,
-          xmlRetorno: json.caminho_xml_nota_fiscal || undefined
+          mensagem: `NFS-e autorizada com sucesso via Focus NFe (Nº ${json.numero || payload.numeroRps})!`,
+          xmlRetorno
         };
       }
 
@@ -147,6 +155,16 @@ export class FocusNfeAdapter implements INfseAdapter {
             });
             const checkJson = await checkRes.json();
             if (checkJson.status === 'autorizado') {
+              let xmlRetorno = checkJson.caminho_xml_nota_fiscal || undefined;
+              if (xmlRetorno && (xmlRetorno.startsWith('http') || xmlRetorno.startsWith('/'))) {
+                try {
+                  const xmlUrl = xmlRetorno.startsWith('http') ? xmlRetorno : `${baseUrl}${xmlRetorno}`;
+                  const fetchRes = await fetch(xmlUrl, { headers: { 'Authorization': authHeader } });
+                  if (fetchRes.ok) {
+                    xmlRetorno = await fetchRes.text();
+                  }
+                } catch (_) {}
+              }
               return {
                 success: true,
                 status: 'autorizada',
@@ -158,8 +176,8 @@ export class FocusNfeAdapter implements INfseAdapter {
                 protocolo: checkJson.protocolo || referencia,
                 linkVisualizacao: checkJson.url_danfse || checkJson.url || undefined,
                 pdfUrl: checkJson.url_danfse || undefined,
-                mensagem: `NFS-e Salvador autorizada com sucesso via Focus NFe (Nº ${checkJson.numero || payload.numeroRps})!`,
-                xmlRetorno: checkJson.caminho_xml_nota_fiscal || undefined
+                mensagem: `NFS-e autorizada com sucesso via Focus NFe (Nº ${checkJson.numero || payload.numeroRps})!`,
+                xmlRetorno
               };
             }
           } catch (_) {}
@@ -176,7 +194,7 @@ export class FocusNfeAdapter implements INfseAdapter {
         dataEmissao: new Date().toISOString(),
         protocolo: json.referencia || referencia,
         linkVisualizacao: json.url_danfse || undefined,
-        mensagem: 'NFS-e transmitida para a Focus NFe e em processamento na Prefeitura de Salvador.'
+        mensagem: 'NFS-e transmitida para a Focus NFe e em processamento na Prefeitura.'
       };
 
     } catch (err: any) {

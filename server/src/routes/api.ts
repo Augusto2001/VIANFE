@@ -119,6 +119,7 @@ router.post('/nfse/monthly-sync', verifyJwtAndTenant, nfseController.syncMonthly
 router.get('/nfse/monthly-report/:companyId/:mesAno/pdf', optionalJwtOrPublicDoc, nfseController.getMonthlyReportPdf);
 router.get('/nfse/monthly-summary/:companyId/:mesAno', verifyJwtAndTenant, nfseController.getMonthlySummary);
 router.post('/nfse/batch-sync-month', verifyJwtAndTenant, nfseController.batchSyncMonth);
+router.post('/nfse/sync-all-cities', verifyJwtAndTenant, nfseController.syncAllCities);
 
 
 // ============================================================================
