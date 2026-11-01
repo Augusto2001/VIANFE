@@ -105,12 +105,14 @@ export class MultiCityNfseService {
       // Persistir XML
       fs.writeFileSync(xmlFilePath, rawXml, 'utf-8');
 
-      // Gerar e persistir PDF oficial
-      try {
-        const pdfBuf = await originalNfsePdf(rawXml);
-        fs.writeFileSync(pdfFilePath, pdfBuf);
-      } catch (pdfErr: any) {
-        console.warn(`[MultiCity NFS-e] Aviso: Não foi possível pré-gerar DANFSe para ${chaveAcesso}: ${pdfErr.message}`);
+      // Gerar e persistir PDF oficial se ainda não existir
+      if (!fs.existsSync(pdfFilePath)) {
+        try {
+          const pdfBuf = await originalNfsePdf(rawXml);
+          fs.writeFileSync(pdfFilePath, pdfBuf);
+        } catch (pdfErr: any) {
+          console.warn(`[MultiCity NFS-e] Aviso: Não foi possível pré-gerar DANFSe para ${chaveAcesso}: ${pdfErr.message}`);
+        }
       }
 
       const now = new Date().toISOString();
@@ -280,19 +282,38 @@ export class MultiCityNfseService {
 
     const allFiles: string[] = [];
     const scanDirRecursive = (dir: string, depth = 0) => {
-      if (depth > 6) return;
+      if (depth > 8) return;
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = path.join(dir, entry.name);
           if (entry.isDirectory()) {
             const up = entry.name.toUpperCase();
-            if (up.includes('SETOR FISCAL') || up.includes('NF') || up.includes('SERVIC') || up.includes('2026') || depth < 3) {
+            if (depth === 0) {
               scanDirRecursive(fullPath, depth + 1);
+            } else if (depth === 1) {
+              if (up.includes('FISCAL') || up.includes('NF') || up.includes('NOTA') || up.includes('SERVIC')) {
+                scanDirRecursive(fullPath, depth + 1);
+              }
+            } else {
+              if (
+                up.includes('NF') ||
+                up.includes('SERVIC') ||
+                up.includes('EMITIDA') ||
+                up.includes('SAIDA') ||
+                up.includes('ENTRADA') ||
+                up.includes('REVISADA') ||
+                up.includes('XML') ||
+                up.includes('202') ||
+                /^\d{2}$/.test(entry.name) ||
+                /^\d{2}\.\d{4}$/.test(entry.name)
+              ) {
+                scanDirRecursive(fullPath, depth + 1);
+              }
             }
           } else if (entry.isFile()) {
             const low = entry.name.toLowerCase();
-            if (low.endsWith('.xml') && (low.includes('nfse') || low.includes('servico') || low.includes('consolidado'))) {
+            if (low.endsWith('.xml') && (low.includes('nfse') || low.includes('servico') || low.includes('consolidado') || low.startsWith('202') || low.includes('lote'))) {
               allFiles.push(fullPath);
             }
           }
