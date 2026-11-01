@@ -32,6 +32,7 @@ interface CompaniesViewProps {
   isModalOpen: boolean;
   onCloseModal: () => void;
   onOpenModal: () => void;
+  currentUser?: any;
 }
 
 export const CompaniesView: React.FC<CompaniesViewProps> = ({
@@ -42,6 +43,7 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
   isModalOpen,
   onCloseModal,
   onOpenModal,
+  currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);

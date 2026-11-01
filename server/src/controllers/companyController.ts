@@ -7,15 +7,62 @@ import { cleanNumeric, encryptText } from '../utils/crypto.js';
 import { validatePfxCertificate } from '../utils/pfxLoader.js';
 import { sefazDfeClient } from '../services/sefazDfeClient.js';
 
+
+// Lista Branca (Allowlist) de colunas públicas seguras:
+// NUNCA expor cert_password_enc, nfse_senha_prefeitura ou focus_nfe_token ao cliente
+const COMPANY_SAFE_COLUMNS = `
+  c.id,
+  c.cnpj,
+  c.razao_social,
+  c.nome_fantasia,
+  c.ie,
+  c.inscricao_municipal,
+  c.uf,
+  c.email,
+  c.telefone,
+  c.status,
+  c.sefaz_ambiente,
+  c.last_nsu,
+  c.last_sync_at,
+  c.cert_filename,
+  c.cert_valid_until,
+  c.emite_nfse,
+  c.nfse_provedor,
+  c.nfse_tipo_auth,
+  c.nfse_usuario_prefeitura,
+  c.nfse_prefeitura_padrao,
+  c.nfse_aliquota_padrao,
+  c.nfse_iss_retido_padrao,
+  c.item_servico_padrao,
+  c.cnae_padrao,
+  c.codigo_tributacao_municipio,
+  c.sefaz_locked_until,
+  c.sefaz_last_cstat,
+  c.sefaz_last_xmotivo,
+  c.created_at,
+  c.updated_at
+`;
+
+function sanitizeCompanyOutput(comp: any): any {
+  if (!comp) return comp;
+  const {
+    cert_password_enc,
+    nfse_senha_prefeitura,
+    focus_nfe_token,
+    ...safe
+  } = comp;
+  return safe;
+}
+
 export const companyController = {
   /**
    * List all registered client companies
    */
   async list(req: Request, res: Response) {
     try {
-      const companies = db.prepare(`
+      const rawCompanies = db.prepare(`
         SELECT 
-          c.*,
+          ${COMPANY_SAFE_COLUMNS},
           g.folder_id as gdrive_folder_id,
           g.folder_name as gdrive_folder_name,
           g.sync_frequency as gdrive_sync_frequency,
@@ -29,6 +76,7 @@ export const companyController = {
         ORDER BY c.razao_social ASC
       `).all();
 
+      const companies = rawCompanies.map(sanitizeCompanyOutput);
       return res.json({ success: true, data: companies });
     } catch (err: any) {
       console.error('Error listing companies:', err);
@@ -42,17 +90,18 @@ export const companyController = {
   async getById(req: Request, res: Response) {
     try {
       const id = String(req.params.id);
-      const company = db.prepare(`
-        SELECT c.*, g.folder_id as gdrive_folder_id, g.folder_name as gdrive_folder_name, g.sync_frequency, g.is_active as gdrive_active
+      const rawCompany = db.prepare(`
+        SELECT ${COMPANY_SAFE_COLUMNS}, g.folder_id as gdrive_folder_id, g.folder_name as gdrive_folder_name, g.sync_frequency, g.is_active as gdrive_active
         FROM companies c
         LEFT JOIN gdrive_configs g ON c.id = g.company_id
         WHERE c.id = ?
       `).get(id);
 
-      if (!company) {
+      if (!rawCompany) {
         return res.status(404).json({ success: false, message: 'Empresa não encontrada.' });
       }
 
+      const company = sanitizeCompanyOutput(rawCompany);
       return res.json({ success: true, data: company });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message });
@@ -145,7 +194,7 @@ export const companyController = {
         now
       );
 
-      const created = db.prepare('SELECT * FROM companies WHERE id = ?').get(id);
+      const created = sanitizeCompanyOutput(db.prepare(`SELECT ${COMPANY_SAFE_COLUMNS} FROM companies c WHERE c.id = ?`).get(id));
       return res.status(201).json({ success: true, data: created, message: 'Empresa cadastrada com sucesso!' });
     } catch (err: any) {
       console.error('Error creating company:', err);
@@ -238,7 +287,7 @@ export const companyController = {
         );
       }
 
-      const updated = db.prepare('SELECT * FROM companies WHERE id = ?').get(id);
+      const updated = sanitizeCompanyOutput(db.prepare(`SELECT ${COMPANY_SAFE_COLUMNS} FROM companies c WHERE c.id = ?`).get(id));
       return res.json({ success: true, data: updated, message: 'Empresa atualizada com sucesso!' });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message });

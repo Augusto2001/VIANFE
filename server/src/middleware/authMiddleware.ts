@@ -111,3 +111,36 @@ export const requireAdmin = (req: AuthenticatedRequest, res: Response, next: Nex
   }
   next();
 };
+
+
+/**
+ * Middleware: Require Master Role (Diretoria Executiva / Augusto e Val)
+ */
+export const requireMaster = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const user = req.user;
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Acesso negado. Usuário não autenticado.',
+      code: 'UNAUTHORIZED'
+    });
+  }
+
+  const isMaster = user.role === 'master' || (
+    user.role === 'admin' && (
+      user.id === 'usr_admin_viacont_master' ||
+      (user.email && (user.email.toLowerCase().includes('augusto') || user.email.toLowerCase().includes('val'))) ||
+      (user.name && (user.name.toLowerCase().includes('augusto') || user.name.toLowerCase().includes('val')))
+    )
+  );
+
+  if (!isMaster) {
+    return res.status(403).json({
+      success: false,
+      error: 'Acesso negado. Operação restrita à alçada dos Diretores Master (Augusto e Val).',
+      code: 'FORBIDDEN_NOT_MASTER'
+    });
+  }
+
+  next();
+};

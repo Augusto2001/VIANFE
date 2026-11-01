@@ -16,7 +16,7 @@ import { nfseController } from '../controllers/nfseController.js';
 import { bpoController } from '../controllers/bpoController.js';
 import { tenantsController } from '../controllers/tenantsController.js';
 import { portalController } from '../controllers/portalController.js';
-import { verifyJwtAndTenant, requireAdmin, optionalJwtOrPublicDoc } from '../middleware/authMiddleware.js';
+import { verifyJwtAndTenant, requireAdmin, requireMaster, optionalJwtOrPublicDoc } from '../middleware/authMiddleware.js';
 import { db } from '../database/db.js';
 
 const router = Router();
@@ -45,7 +45,7 @@ router.get('/companies', verifyJwtAndTenant, companyController.list);
 router.get('/companies/:id', verifyJwtAndTenant, companyController.getById);
 router.post('/companies', verifyJwtAndTenant, companyController.create);
 router.put('/companies/:id', verifyJwtAndTenant, companyController.update);
-router.delete('/companies/:id', verifyJwtAndTenant, companyController.delete);
+router.delete('/companies/:id', verifyJwtAndTenant, requireMaster, companyController.delete);
 router.post('/companies/:id/certificate', verifyJwtAndTenant, uploadTemp.single('certificate'), companyController.uploadCertificate);
 router.get('/cnpj/lookup/:cnpj', verifyJwtAndTenant, companyController.searchCnpj);
 router.get('/companies/:id/test-certificate', verifyJwtAndTenant, companyController.testCertificate);
