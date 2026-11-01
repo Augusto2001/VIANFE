@@ -64,6 +64,17 @@ export const KNOWN_FOLDER_ALIASES: FolderAliasMapping[] = [
       'CHURRASCARIA TRADICAO GAUCHA'
     ],
     folderName: 'CHURRASCARIA TRADIÇÃO LTDA (SN) ( 13 )'
+  },
+  {
+    cnpj: '11415194000102',
+    aliases: [
+      'BOM TODO',
+      'BOM TODO COMERCIO',
+      'BOM TODO COMERCIO VAREJISTA',
+      'BOM TODO COMERCIO VAREJISTA LTDA',
+      'BOM TODO COMERCIO VAREJISTA EIRELI'
+    ],
+    folderName: 'BOM TODO COMERCIO VAREJISTA EIRELI ME ( 4 ) (SN) ( 11 )'
   }
 ];
 
