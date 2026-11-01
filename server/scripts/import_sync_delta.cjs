@@ -31,11 +31,12 @@ const updateCompStmt = db.prepare(`
     codigo_tributacao_municipio = COALESCE(?, codigo_tributacao_municipio),
     nfse_provedor = COALESCE(?, nfse_provedor),
     updated_at = datetime('now')
-  WHERE id = ?
+  WHERE id = ? OR replace(replace(replace(replace(cnpj, '.', ''), '/', ''), '-', ''), ' ', '') = ?
 `);
 
 let compUpdated = 0;
 for (const c of delta.companies) {
+  const cleanCnpj = (c.cnpj || '').replace(/\D/g, '');
   updateCompStmt.run(
     c.cert_filename,
     c.cert_password_enc,
@@ -48,7 +49,8 @@ for (const c of delta.companies) {
     c.cnae_padrao,
     c.codigo_tributacao_municipio,
     c.nfse_provedor,
-    c.id
+    c.id,
+    cleanCnpj
   );
   compUpdated++;
 }
@@ -86,15 +88,34 @@ const insertInvStmt = db.prepare(`
     xml_raw = excluded.xml_raw
 `);
 
+const compCheckStmt = db.prepare('SELECT id FROM companies WHERE id = ?');
+const compByCnpjStmt = db.prepare("SELECT id FROM companies WHERE replace(replace(replace(replace(cnpj, '.', ''), '/', ''), '-', ''), ' ', '') = ? LIMIT 1");
+
 const allInvoices = [
   ...(delta.bomTodoInvoices || delta.invoices || []),
   ...(delta.nfseInvoices || [])
 ];
 
 let invInserted = 0;
+let invSkipped = 0;
+
 for (const inv of allInvoices) {
+  let finalCompanyId = inv.company_id;
+  const compRow = compCheckStmt.get(finalCompanyId);
+  if (!compRow) {
+    const cleanEmit = (inv.emitente_cnpj || '').replace(/\D/g, '');
+    const cleanDest = (inv.destinatario_cnpj || '').replace(/\D/g, '');
+    const found = compByCnpjStmt.get(cleanEmit) || compByCnpjStmt.get(cleanDest);
+    if (found) {
+      finalCompanyId = found.id;
+    } else {
+      invSkipped++;
+      continue;
+    }
+  }
+
   insertInvStmt.run(
-    inv.id, inv.company_id, inv.chave_acesso, inv.numero, inv.serie, inv.modelo, inv.tipo, inv.status,
+    inv.id, finalCompanyId, inv.chave_acesso, inv.numero, inv.serie, inv.modelo, inv.tipo, inv.status,
     inv.natureza_operacao, inv.data_emissao, inv.emitente_cnpj, inv.emitente_nome, inv.emitente_uf,
     inv.destinatario_cnpj, inv.destinatario_nome, inv.destinatario_uf, inv.valor_total,
     inv.valor_produtos, inv.valor_icms, inv.valor_pis, inv.valor_cofins, inv.valor_ipi,
@@ -102,7 +123,10 @@ for (const inv of allInvoices) {
   );
   invInserted++;
 }
-console.log(`✅ ${invInserted} notas (NFS-e e Saídas 65) inseridas/atualizadas com sucesso.`);
+console.log(`✅ ${invInserted} notas (NFS-e e Saídas 65) inseridas/atualizadas com sucesso (ignoradas sem empresa: ${invSkipped}).`);
 
 const finalInvoices = db.prepare('SELECT count(*) as count, sum(valor_total) as total FROM invoices').get();
 console.log(`Total Invoices VPS: ${finalInvoices.count} | Valor Total: R$ ${finalInvoices.total.toFixed(2)}`);
+
+const nfseStats = db.prepare("SELECT count(*) as count, sum(valor_total) as total FROM invoices WHERE modelo = 'NFS-e'").get();
+console.log(`Total NFS-e na VPS: ${nfseStats.count} | Valor NFS-e R$: ${Number(nfseStats.total || 0).toFixed(2)}`);
