@@ -703,6 +703,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                           inv.status === 'autorizada'
                             ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                            : (inv.status && inv.status.startsWith('manifestado'))
+                            ? 'bg-sky-500/10 text-sky-300 border border-sky-500/20'
                             : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
                         }`}>
                           {inv.status}

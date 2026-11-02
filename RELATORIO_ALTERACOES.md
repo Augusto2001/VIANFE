@@ -87,3 +87,33 @@
   - Total pendente: **0**
   - IDs oficiais de arquivo do Google Drive gerados e persistidos em `invoices.gdrive_file_id`.
   - Endpoint `GET /api/drive/status` respondendo `{ isConfigured: true, mode: 'google_api' }`.
+
+
+---
+
+## [Fase 2] — 02/11/2026 — Auditoria Técnica de Outubro/2026 (Ciência vs XML Completo) e Diagnóstico de Saídas
+
+### 1. Auditoria Estrutural das 469 Notas de Entrada em `manifestado_ciencia`
+- **Data:** 02/11/2026 05:15 BRT
+- **Arquivos:**
+  - [`client/src/components/Dashboard.tsx`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/client/src/components/Dashboard.tsx)
+  - [`server/src/services/sefazService.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/sefazService.ts)
+- **Diagnóstico:**
+  1. No banco de dados de produção, 469 notas de Outubro/2026 constavam com `status = 'manifestado_ciencia'`.
+  2. A auditoria profunda dos campos `xml_raw`, `xml_file_path` e `pdf_file_path` comprovou que **100% das 469 notas (469 de 469) JÁ POSSUEM O XML COMPLETO CANÔNICO (`<nfeProc>` de 8 a 15 KB com chave de 44 dígitos, itens, tributos ICMS/PIS/COFINS e protocolo de autorização cStat 100)** e o DANFE PDF gerado no storage e sincronizado no Google Drive.
+  3. O status permaneceu gravado como `'manifestado_ciencia'` por projeto arquitetural (`server/tests/ingest-preservation.cjs`) para registrar que o evento fiscal 210210 (Ciência da Emissão) foi realizado.
+  4. As únicas 12 notas em Outubro que não possuem `nfeProc` são notas denegadas pela SEFAZ (`status = 'denegada'`, código de situação fiscal 3). Por especificação técnica federal da SEFAZ Nacional, notas denegadas por irregularidade fiscal nunca recebem autorização de uso (`nfeProc`), portanto não há pendência de recuperação.
+  5. As 93 notas sem `xml_raw` no banco são NFS-e de Salvador de saídas, cujos arquivos XML e PDF físicos estão salvos no storage de exports e já foram 100% sincronizados no Google Drive em Fase 1.
+- **Ajuste Visual:**
+  - O componente `Dashboard.tsx` tratava qualquer status diferente de `'autorizada'` com badge vermelho de erro (`bg-rose-500`). Foi ajustado para renderizar notas manifestadas com badge azul celeste oficial (`bg-sky-500/10 text-sky-300`), distinguindo notas manifestadas regulares de rejeições/cancelamentos.
+- **Como testar:**
+  - Executar os 22 testes de regressão com `node server/scripts/run_all_tests.cjs` (22/22 aprovados).
+  - Executar compilação do cliente com `npm --prefix client run build` (0 erros).
+
+### 2. Diagnóstico da Diferença de Volume de Saídas (Setembro vs Outubro)
+- **Data:** 02/11/2026 05:20 BRT
+- **Causa Raiz Identificada:**
+  1. Em Setembro/2026, o banco acumulou 7.563 documentos porque continha **6.265 cupons NFC-e (modelo 65)** e 331 notas de saída modelo 55 de vendas de comércio (Farmácia Preço Bom: 1.610 NFC-e; RWM Medicamentos: 1.553 NFC-e; Farmácia Dias Queiroz: 1.275 NFC-e; Tradição Gaúcha: 1.219 NFC-e; Biapell: 525 NFC-e).
+  2. A SEFAZ Nacional (`NFeDistribuicaoDFe`) disponibiliza **estritamente compras/entradas** emitidas por terceiros contra os CNPJs dos clientes. Não distribui cupom de venda de balcão (NFC-e mod 65) nem saídas do próprio emitente.
+  3. O mês de Outubro encerrou em 01/11/2026 (ontem foi o primeiro dia após o encerramento do mês). No varejo, o fechamento dos PDVs e ERPs (Trier, Hiper, SysPDV) ocorre entre o 1º e o 5º dia útil do mês subsequente, quando os clientes ou robôs de integração depositam os arquivos de faturamento no Google Drive.
+  4. Varredura recursiva em `G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS` e `SETORES\SETOR FISCAL` confirmou que as pastas de fechamento de caixa e movimento fiscal de vendas de Outubro ainda não foram disponibilizadas pelos clientes/integradores, justificando a contagem de saídas de Outubro neste momento.
