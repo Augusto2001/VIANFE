@@ -6,6 +6,7 @@ import { sefazService } from '../services/sefazService.js';
 import { googleDriveService } from '../services/googleDriveService.js';
 import { predictiveAlertsService } from '../services/predictiveAlertsService.js';
 import { morningSalesSyncService } from '../services/morningSalesSyncService.js';
+import { hiperSyncWorker } from '../services/hiperSyncWorker.js';
 
 export function initScheduler() {
   console.log('✓ [ROBÔ 24/7] Inicializando motor autônomo de sincronização SEFAZ e Google Drive...');
@@ -179,6 +180,21 @@ export function initScheduler() {
     morningSalesSyncService.runMorningBatchSync('REPESCAGEM_07H30').catch(e => console.error('[ROBÔ MATUTINO REPESCAGEM] Erro:', e.message));
   }, { timezone: 'America/Sao_Paulo' });
 
+  // 8. Robô Mensal Hiper Contador (Dia 1º do mês às 05:00 AM - Horário de Brasília)
+  cron.schedule('0 5 1 * *', () => {
+    hiperSyncWorker.triggerMonthlyXmlGeneration().catch(e => console.error('[ROBÔ HIPER DIA 1] Erro:', e.message));
+  }, { timezone: 'America/Sao_Paulo' });
+
+  // 9. 1ª Repescagem Mensal Hiper Contador (Dia 3 do mês às 05:00 AM - Horário de Brasília)
+  cron.schedule('0 5 3 * *', () => {
+    hiperSyncWorker.triggerMonthlyXmlGeneration().catch(e => console.error('[ROBÔ HIPER DIA 3] Erro:', e.message));
+  }, { timezone: 'America/Sao_Paulo' });
+
+  // 10. 2ª Repescagem Mensal Hiper Contador (Dia 4 do mês às 05:00 AM - Horário de Brasília)
+  cron.schedule('0 5 4 * *', () => {
+    hiperSyncWorker.triggerMonthlyXmlGeneration().catch(e => console.error('[ROBÔ HIPER DIA 4] Erro:', e.message));
+  }, { timezone: 'America/Sao_Paulo' });
+
   console.log('✓ [ROBÔ 24/7] Agendamentos fiscais configurados para a Janela Noturna e Mensal:');
   console.log('  └─ Varredura Madrugada 1: Diariamente às 01:15 AM (Brasília)');
   console.log('  └─ Varredura Madrugada 2: Diariamente às 02:30 AM (Brasília)');
@@ -188,5 +204,8 @@ export function initScheduler() {
   console.log('  └─ Radar Alertas Preditivos WhatsApp: Diariamente às 09:30 AM (Brasília)');
   console.log('  └─ Fechamento Mensal NFS-e: Dia 1º às 06:00 AM (Brasília)');
   console.log('  └─ Repescagem Mensal NFS-e: Dia 3º às 06:00 AM (Brasília)');
+  console.log('  └─ Robô Hiper Vendas: Dia 1º às 05:00 AM (Brasília)');
+  console.log('  └─ Robô Hiper 1ª Repescagem: Dia 3 às 05:00 AM (Brasília)');
+  console.log('  └─ Robô Hiper 2ª Repescagem: Dia 4 às 05:00 AM (Brasília)');
 }
 

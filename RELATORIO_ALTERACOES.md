@@ -148,3 +148,29 @@
     4. Rejeição de requisição vazia (HTTP 400).
     5. Rejeição de XML corrompido / não-fiscal.
 
+### 4. Automação do Robô Hiper Contador e Agendamento Mensal (Dias 1, 3 e 4)
+- **Data:** 02/11/2026 10:10 BRT
+- **Arquivos:**
+  - [`server/src/services/hiperSyncWorker.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/hiperSyncWorker.ts)
+  - [`server/src/jobs/scheduler.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/jobs/scheduler.ts)
+- **Implementação do Robô Headless:**
+  - Navega pelo portal oficial `https://contador.hiper.com.br`, realiza login master e itera de forma resiliente por cada uma das 8 lojas ativas da Viacont:
+    1. Churrascaria Tradição Gaúcha (51.090.446/0001-95)
+    2. Biapell Presentes (43.855.131/0001-63)
+    3. Depósito Novo Horizonte (33.281.238/0001-91)
+    4. CS Mármores e Granitos (48.987.894/0001-81)
+    5. Leandro Gomes Nogueira (73.472.235/0001-50)
+    6. Trend Telecom (35.541.790/0001-05)
+    7. Lopes Sales Móveis (14.317.503/0001-08)
+    8. Mi Regalo Comércio (48.292.424/0001-01)
+  - Acessa `acessar-gestao/{uuid}` de cada loja, navega para `contabilidade/download-de-xml/gerar`, seleciona o ano/mês desejado e solicita o pacote ZIP completo de vendas para entrega em `atendimento@viacont.com.br`.
+- **Execução Real de Outubro/2026 (Sob Demanda):**
+  - **Solicitados com Sucesso no Hiper:** 6 lojas (*Churrascaria Tradição Gaúcha, Biapell Presentes, Depósito Novo Horizonte, CS Mármores, Leandro Gomes e Trend Telecom*).
+  - **Confirmados Sem Movimento no Mês:** 2 lojas (*Lopes Sales Móveis e Mi Regalo Comércio*).
+- **Grade Oficial de Agendamento no ViaNFe (`scheduler.ts`):**
+  - **Dia 1º do mês às 05h00 BRT:** Disparo oficial de geração das lojas no Hiper Contador (`0 5 1 * *`).
+  - **Dia 3 do mês às 05h00 BRT:** 1ª repescagem para pegar fechamentos tardios (`0 5 3 * *`).
+  - **Dia 4 do mês às 05h00 BRT:** 2ª repescagem final de fechamento contábil (`0 5 4 * *`).
+  - **Diariamente a cada 30 min (07h às 20h):** Ingestão contínua dos ZIPs entregues no e-mail pelo n8n.
+
+
