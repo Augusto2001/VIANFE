@@ -117,3 +117,34 @@
   2. A SEFAZ Nacional (`NFeDistribuicaoDFe`) disponibiliza **estritamente compras/entradas** emitidas por terceiros contra os CNPJs dos clientes. Não distribui cupom de venda de balcão (NFC-e mod 65) nem saídas do próprio emitente.
   3. O mês de Outubro encerrou em 01/11/2026 (ontem foi o primeiro dia após o encerramento do mês). No varejo, o fechamento dos PDVs e ERPs (Trier, Hiper, SysPDV) ocorre entre o 1º e o 5º dia útil do mês subsequente, quando os clientes ou robôs de integração depositam os arquivos de faturamento no Google Drive.
   4. Varredura recursiva em `G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS` e `SETORES\SETOR FISCAL` confirmou que as pastas de fechamento de caixa e movimento fiscal de vendas de Outubro ainda não foram disponibilizadas pelos clientes/integradores, justificando a contagem de saídas de Outubro neste momento.
+
+### 3. Webhook Seguro de Ingestão de Notas Fiscais por E-mail (n8n / Gmail / Conta Azul / Hiper)
+- **Data:** 02/11/2026 08:30 BRT
+- **Arquivos:**
+  - [`server/src/controllers/webhookController.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/controllers/webhookController.ts)
+  - [`server/src/routes/api.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/routes/api.ts)
+  - [`server/src/index.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/index.ts)
+  - [`server/tests/email-webhook.cjs`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/tests/email-webhook.cjs)
+- **Motivação:**
+  - Facilitar e automatizar a captura de notas fiscais de vendas/saídas enviadas pelos clientes e ERPs (Conta Azul, Hiper Gestão/Contador, Bling, Tiny, Omie) para a caixa postal oficial da contabilidade (`atendimento@viacont.com.br`).
+- **Arquitetura de Segurança (Blindagem Anti-Malware em 5 Camadas):**
+  1. **Autenticação Rigorosa de Webhook:** Requisições exigem token secreto via cabeçalho `x-webhook-token`, query `?token=` ou Bearer token (`vianfe_email_sec_2026_viacont` ou chave configurada em `.env`).
+  2. **Bloqueio Ativo de Extensões Perigosas:** Descarte sumário de qualquer arquivo com extensões executáveis ou de script (`.exe`, `.scr`, `.bat`, `.cmd`, `.vbs`, `.js`, `.ps1`, `.com`, `.pif`, `.msi`, `.dll`, `.jar`, `.iso`, etc.), mesmo que disfarçados ou enviados por e-mails de remetentes desconhecidos.
+  3. **Proteção contra Zip Bomb e Arquivos Ocultos:** Limite estrito de descompactação de ZIPs (máximo 25MB). O descompactador em memória valida arquivo por arquivo dentro do ZIP, descartando itens perigosos antes de qualquer processamento.
+  4. **Validação Estrutural e Canônica do XML (SEFAZ):** Somente XMLs válidos que passem pelo parser canônico da SEFAZ (`parseFiscalXml`) com chave de 44 dígitos e estrutura fiscal legítima (`<infNFe>`, `<infCce>`, `<infEvento>`, `<nfeProc>`) são aceitos.
+  5. **Filtro de Carteira Viacont:** O sistema valida o CNPJ do emitente e destinatário contra a tabela de empresas cadastradas no ViaNFe. XMLs avulsos ou spams de terceiros que não pertençam a clientes da Viacont são descartados com segurança sem poluir o banco.
+- **Classificação Automática de Direção e Backup no Google Drive:**
+  - Se o emitente pertencer à carteira da Viacont, o documento é automaticamente classificado como `saida` (venda do cliente).
+  - Se o destinatário pertencer à carteira, é classificado como `entrada` (compra).
+  - O pipeline oficial `sefazService.ingestXml` gera o DANFE em PDF correspondente e realiza o upload na pasta do cliente no Google Drive (`invoices.gdrive_synced = 1`).
+- **Lembrete Arquitetural para Evolução em Produto (SaaS):**
+  - **Atual (Viacont):** Operação ágil e flexível orquestrada via n8n ouvindo a caixa Google Workspace `atendimento@viacont.com.br` e disparando para o webhook seguro.
+  - **Futuro (Produto Comercial):** O ViaNFe incorporará worker de fundo IMAP/POP3 nativo configurável por tenant no portal de configurações do escritório, permitindo a cada escritório cliente plugar suas próprias caixas de e-mail diretamente.
+- **Validação de Testes Automatizados:**
+  - Suíte `server/tests/email-webhook.cjs` executada com 100% de aprovação nos cenários:
+    1. Bloqueio de acesso não autenticado (HTTP 401).
+    2. Bloqueio de token inválido (HTTP 403).
+    3. Barreira anti-malware (bloqueio de anexo `.exe`).
+    4. Rejeição de requisição vazia (HTTP 400).
+    5. Rejeição de XML corrompido / não-fiscal.
+

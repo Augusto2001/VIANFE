@@ -16,6 +16,7 @@ import { nfseController } from '../controllers/nfseController.js';
 import { bpoController } from '../controllers/bpoController.js';
 import { tenantsController } from '../controllers/tenantsController.js';
 import { portalController } from '../controllers/portalController.js';
+import { webhookController } from '../controllers/webhookController.js';
 import { verifyJwtAndTenant, requireAdmin, requireMaster, optionalJwtOrPublicDoc } from '../middleware/authMiddleware.js';
 import { db } from '../database/db.js';
 
@@ -113,6 +114,9 @@ router.post('/portal/nfse/clients', verifyJwtAndTenant, nfseAccess, nfseControll
 router.delete('/portal/nfse/clients/:id', verifyJwtAndTenant, nfseAccess, nfseController.deleteRecurringClient);
 router.get('/portal/nfse/focus-config', verifyJwtAndTenant, nfseAccess, nfseController.getFocusNfeConfig);
 router.post('/portal/nfse/webhook-whatsapp', verifyJwtAndTenant, nfseAccess, nfseController.handleWhatsappWebhook); // Webhook integration
+
+// Webhook Seguro para Ingestão de Notas por E-mail (n8n / Gmail / Conta Azul / Hiper)
+router.post('/webhooks/email-invoices', uploadTemp.array('files', 50), webhookController.handleEmailInvoicesWebhook);
 
 // Módulo Oficial NFS-e Salvador / Nacional ADN - Auditoria e Fechamento Mensal
 router.post('/nfse/monthly-sync', verifyJwtAndTenant, nfseController.syncMonthlyNfse);
