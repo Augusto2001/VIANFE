@@ -47,3 +47,26 @@
 - **Como testar:**
   1. Executar `node server/scripts/test_fase0_security.cjs` (cenários 3.1 a 3.5 aprovados).
 - **Como desfazer:** Reverter `server/src/routes/api.ts` e `server/src/middleware/authMiddleware.ts` via `git checkout`.
+
+
+---
+
+## [Fase 1] — 01/11/2026 — Diagnóstico, Correção do Mecanismo de Sincronização e Preparação do Google Drive
+
+### 1. Diagnóstico da Conexão do Google Drive e Status de Outubro/2026
+- **Data:** 01/11/2026 21:30 BRT
+- **Arquivos:**
+  - [`server/src/services/googleDriveService.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/googleDriveService.ts)
+  - [`server/src/services/sefazService.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/sefazService.ts)
+- **Problema:** 
+  1. A rota `GET /api/drive/status` retornava `{ mode: 'not_configured' }` porque a tabela `system_settings` está vazia na nuvem (sem a chave `gdrive_credentials`).
+  2. Em Outubro/2026, das **751 notas** existentes no banco de produção, apenas **10** constavam com `gdrive_synced = 1`, deixando **741 notas pendentes**.
+  3. No método `syncInvoiceToDrive` em `sefazService.ts`, a gravação de `gdrive_synced = 1` estava aninhada unicamente no bloco de envio de PDF (`if (invoice.pdf_file_path && fs.existsSync(...))`). Se a nota possuísse apenas o XML autorizado (caso de notas capturadas da SEFAZ sem geração de DANFE), o XML era enviado, mas a nota nunca era marcada como sincronizada, permanecendo eternamente pendente.
+- **Correção:**
+  1. Alterado `sefazService.ts` para capturar `uploadedFileId` tanto do upload de XML quanto do upload de PDF.
+  2. A instrução `UPDATE invoices SET gdrive_synced = 1, gdrive_file_id = ?` foi movida para executar logo após os uploads caso qualquer arquivo tenha sido transmitido com sucesso.
+- **Como testar:**
+  1. Executar `node server/tests/no-simulated-success.cjs` e `node server/tests/science-protocol.cjs` (ambos aprovados).
+  2. Compilar com `npm --prefix server run build` (0 erros).
+- **Como desfazer:**
+  1. Reverter `server/src/services/sefazService.ts` via `git checkout server/src/services/sefazService.ts`.

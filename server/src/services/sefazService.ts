@@ -296,6 +296,8 @@ export class SefazService {
     const month = String(emissionDate.getMonth() + 1).padStart(2, '0');
 
     try {
+      let uploadedFileId: string | null = null;
+
       // 1. Upload XML
       if (invoice.xml_file_path && fs.existsSync(invoice.xml_file_path)) {
         const xmlFolderId = await googleDriveService.ensureCompanyFolderStructure(
@@ -306,12 +308,16 @@ export class SefazService {
           'XMLs'
         );
 
-        await googleDriveService.uploadFile(
+        const uploadXmlRes = await googleDriveService.uploadFile(
           invoice.xml_file_path,
           `${invoice.chave_acesso}.xml`,
           xmlFolderId,
           'application/xml'
         );
+
+        if (uploadXmlRes?.fileId) {
+          uploadedFileId = uploadXmlRes.fileId;
+        }
       }
 
       // 2. Upload PDF
@@ -324,13 +330,19 @@ export class SefazService {
           'PDFs'
         );
 
-        const uploadRes = await googleDriveService.uploadFile(
+        const uploadPdfRes = await googleDriveService.uploadFile(
           invoice.pdf_file_path,
           `DANFE_${invoice.chave_acesso}.pdf`,
           pdfFolderId,
           'application/pdf'
         );
 
+        if (uploadPdfRes?.fileId) {
+          uploadedFileId = uploadPdfRes.fileId;
+        }
+      }
+
+      if (uploadedFileId) {
         const now = new Date().toISOString();
         db.prepare(`
           UPDATE invoices SET
@@ -338,7 +350,7 @@ export class SefazService {
             gdrive_file_id = ?,
             gdrive_synced_at = ?
           WHERE id = ?
-        `).run(uploadRes.fileId, now, invoice.id);
+        `).run(uploadedFileId, now, invoice.id);
       }
 
       return true;

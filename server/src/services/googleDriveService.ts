@@ -23,6 +23,7 @@ export class GoogleDriveService {
       if (setting && setting.value) {
         const credentials = JSON.parse(setting.value);
         
+        // 1. Service Account (JWT)
         if (credentials.client_email && credentials.private_key) {
           const auth = new google.auth.JWT(
             credentials.client_email,
@@ -33,6 +34,24 @@ export class GoogleDriveService {
           this.driveClient = google.drive({ version: 'v3', auth });
           this.isConfigured = true;
           console.log('✓ Google Drive Service Account client initialized.');
+          return;
+        }
+
+        // 2. OAuth2 Client (e.g. from Google Cloud / n8n / Viacont)
+        const clientId = credentials.client_id || credentials.clientId;
+        const clientSecret = credentials.client_secret || credentials.clientSecret;
+        const refreshToken = credentials.refresh_token || credentials.oauthTokenData?.refresh_token;
+        const accessToken = credentials.access_token || credentials.oauthTokenData?.access_token;
+
+        if (clientId && clientSecret && refreshToken) {
+          const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+          oauth2Client.setCredentials({
+            refresh_token: refreshToken,
+            access_token: accessToken,
+          });
+          this.driveClient = google.drive({ version: 'v3', auth: oauth2Client });
+          this.isConfigured = true;
+          console.log('✓ Google Drive OAuth2 client initialized.');
           return;
         }
       }
@@ -59,8 +78,14 @@ export class GoogleDriveService {
   public saveCredentials(jsonContent: string) {
     try {
       const parsed = JSON.parse(jsonContent);
-      if (!parsed.client_email || !parsed.private_key) {
-        throw new Error('Formato JSON de credencial Google inválido.');
+      const isServiceAccount = !!(parsed.client_email && parsed.private_key);
+      const clientId = parsed.client_id || parsed.clientId;
+      const clientSecret = parsed.client_secret || parsed.clientSecret;
+      const refreshToken = parsed.refresh_token || parsed.oauthTokenData?.refresh_token;
+      const isOAuth = !!(clientId && clientSecret && refreshToken);
+
+      if (!isServiceAccount && !isOAuth) {
+        throw new Error('Formato JSON de credencial Google inválido (exige Service Account ou OAuth2).');
       }
       
       const now = new Date().toISOString();
@@ -116,7 +141,10 @@ export class GoogleDriveService {
     }
 
     try {
-      const companyFolderId = await this.getOrCreateFolder(cleanCompanyName, baseFolderId);
+      let companyFolderId = baseFolderId;
+      if (baseFolderId === 'root' || baseFolderId === '1Juqlv6RVxXa0uojqUGXX5GyPnFNPfwkC') {
+        companyFolderId = await this.getOrCreateFolder(cleanCompanyName, baseFolderId);
+      }
       const yearFolderId = await this.getOrCreateFolder(year, companyFolderId);
       const monthFolderId = await this.getOrCreateFolder(month, yearFolderId);
       const typeFolderId = await this.getOrCreateFolder(subType, monthFolderId);
