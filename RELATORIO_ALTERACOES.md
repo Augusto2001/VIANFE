@@ -70,3 +70,20 @@
   2. Compilar com `npm --prefix server run build` (0 erros).
 - **Como desfazer:**
   1. Reverter `server/src/services/sefazService.ts` via `git checkout server/src/services/sefazService.ts`.
+
+
+### 2. Conexão OAuth2 n8nviacont@gmail.com e Conclusão do Lote de Outubro
+- **Data:** 02/11/2026 01:59 BRT
+- **Arquivos:**
+  - [`server/src/services/googleDriveService.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/googleDriveService.ts)
+  - [`server/src/services/sefazService.ts`](file:///C:/Users/USER/Documents/ChatGPT/SALES%20-%20DEMONSTRA%C3%87%C3%95ES%20CONTABEIS/vianfe-github-current/server/src/services/sefazService.ts)
+- **Implementação:**
+  1. Adicionado suporte no `GoogleDriveService` para credenciais OAuth2 nativas com renovação de token (`refresh_token`).
+  2. Ajustada a navegação hierárquica para a pasta raiz `CLIENTES ATIVOS` (`1Juqlv6RVxXa0uojqUGXX5GyPnFNPfwkC`) no Google Drive oficial da Viacont.
+  3. Reprocessadas todas as 741 notas pendentes de Outubro/2026 com upload real de XML e DANFE PDF.
+- **Resultado da Auditoria no Banco de Produção:**
+  - Total de notas em Outubro/2026: **751**
+  - Total com `gdrive_synced = 1`: **751 (100%)**
+  - Total pendente: **0**
+  - IDs oficiais de arquivo do Google Drive gerados e persistidos em `invoices.gdrive_file_id`.
+  - Endpoint `GET /api/drive/status` respondendo `{ isConfigured: true, mode: 'google_api' }`.
