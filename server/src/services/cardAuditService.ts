@@ -1,252 +1,275 @@
 import { db } from '../database/db.js';
 
-interface MonthlyBucket {
+export interface CardModalityMonthAudit {
   mes: string;
+  extratoBancoStatus: 'ENTROU' | 'PENDENTE';
+  extratoMaquininhaStatus: 'ENTROU' | 'PENDENTE';
   faturamentoTotal: number;
-  credito: number;
-  debito: number;
-  pixNota: number;
-  boleto: number;
-  dinheiro: number;
-  outrosNota: number;
-  redeAt: number;
-  redeDb: number;
-  cielo: number;
-  pixBanco: number;
-  outrosBanco: number;
-  bankTxCount: number;
-  cardTxCount: number;
-}
-
-function round2(n: number): number {
-  return Math.round((Number(n) || 0) * 100) / 100;
+  qtdNotas: number;
+  modalidadesNota: {
+    dinheiro: number;
+    credito: number;
+    debito: number;
+    pix: number;
+    boleto: number;
+    outros: number;
+    qtdCredito: number;
+    qtdDebito: number;
+    qtdPix: number;
+  };
+  realBanco: {
+    pix: number;
+    redeAt: number;
+    redeDb: number;
+    cielo: number;
+    totalMaquininhas: number;
+    outrosCreditos: number;
+    totalCreditos: number;
+    qtdPix: number;
+    qtdRedeAt: number;
+    qtdRedeDb: number;
+    qtdCielo: number;
+  };
+  confrontoCartao: {
+    notaCartao: number;
+    maquininhaReal: number;
+    divergencia: number;
+    taxaAderencia: number;
+    status: 'CONCILIADO' | 'ATENCAO' | 'CRITICO';
+  };
+  confrontoPix: {
+    notaPix: number;
+    bancoPix: number;
+    divergencia: number;
+    status: 'CONCILIADO' | 'RISCO_OMISSAO';
+  };
 }
 
 export const cardAuditService = {
   getCompanyCardAndModalityAudit(companyId: string) {
-    const invoices = db.prepare(`
-      SELECT id, tipo, modelo, data_emissao, valor_total, pagamentos_json, xml_raw
-      FROM invoices
-      WHERE company_id = ? AND (tipo = 'saida' OR tipo = 'emissao_propria')
-      ORDER BY data_emissao ASC
-    `).all(companyId) as any[];
+    const comp = db.prepare('SELECT id, razao_social, cnpj FROM companies WHERE id = ?').get(companyId) as any;
+    if (!comp) {
+      throw new Error('Empresa não encontrada');
+    }
 
-    const transactions = db.prepare(`
-      SELECT id, data, tipo, valor, descricao_original
-      FROM bank_transactions
-      WHERE company_id = ?
-      ORDER BY data ASC
-    `).all(companyId) as any[];
+    // 1. Fetch Invoices
+    const invoices = db.prepare(
+      "SELECT data_emissao, valor_total, pagamentos_json, xml_raw, modelo FROM invoices WHERE company_id = ? AND tipo = 'saida' ORDER BY data_emissao ASC"
+    ).all(companyId) as any[];
 
-    const months = new Map<string, MonthlyBucket>();
-    const ensureMonth = (mes: string): MonthlyBucket => {
-      let bucket = months.get(mes);
-      if (!bucket) {
-        bucket = {
-          mes,
-          faturamentoTotal: 0,
-          credito: 0,
-          debito: 0,
-          pixNota: 0,
-          boleto: 0,
-          dinheiro: 0,
-          outrosNota: 0,
-          redeAt: 0,
-          redeDb: 0,
-          cielo: 0,
-          pixBanco: 0,
-          outrosBanco: 0,
-          bankTxCount: 0,
-          cardTxCount: 0
-        };
-        months.set(mes, bucket);
-      }
-      return bucket;
-    };
+    // 2. Fetch Bank Transactions
+    const bankTxs = db.prepare(
+      'SELECT data, descricao_original, tipo, valor FROM bank_transactions WHERE company_id = ? ORDER BY data ASC'
+    ).all(companyId) as any[];
 
+    const months = [
+      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05',
+      '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'
+    ];
+
+    const monthlyMap: Record<string, CardModalityMonthAudit> = {};
+
+    for (const m of months) {
+      monthlyMap[m] = {
+        mes: m,
+        extratoBancoStatus: 'PENDENTE',
+        extratoMaquininhaStatus: 'PENDENTE',
+        faturamentoTotal: 0,
+        qtdNotas: 0,
+        modalidadesNota: {
+          dinheiro: 0, credito: 0, debito: 0, pix: 0, boleto: 0, outros: 0,
+          qtdCredito: 0, qtdDebito: 0, qtdPix: 0
+        },
+        realBanco: {
+          pix: 0, redeAt: 0, redeDb: 0, cielo: 0, totalMaquininhas: 0,
+          outrosCreditos: 0, totalCreditos: 0, qtdPix: 0, qtdRedeAt: 0, qtdRedeDb: 0, qtdCielo: 0
+        },
+        confrontoCartao: {
+          notaCartao: 0, maquininhaReal: 0, divergencia: 0, taxaAderencia: 100, status: 'CONCILIADO'
+        },
+        confrontoPix: {
+          notaPix: 0, bancoPix: 0, divergencia: 0, status: 'CONCILIADO'
+        }
+      };
+    }
+
+    // Process Invoices
     for (const inv of invoices) {
-      const rawDate = String(inv.data_emissao || '').slice(0, 7);
-      const mes = /^\d{4}-\d{2}$/.test(rawDate) ? rawDate : 'Sem Data';
-      const bucket = ensureMonth(mes);
-      const valorTotal = Number(inv.valor_total) || 0;
-      bucket.faturamentoTotal += valorTotal;
+      const ym = (inv.data_emissao || '').substring(0, 7);
+      if (!monthlyMap[ym]) continue;
 
-      let pags: Array<{ forma?: string; tPag?: string; valor?: number; vPag?: number }> = [];
+      const item = monthlyMap[ym];
+      const vnf = Number(inv.valor_total) || 0;
+      item.faturamentoTotal += vnf;
+      item.qtdNotas += 1;
+
+      let pags: any[] = [];
       try {
         if (inv.pagamentos_json) {
-          const parsed = JSON.parse(inv.pagamentos_json);
-          if (Array.isArray(parsed)) pags = parsed;
+          pags = JSON.parse(inv.pagamentos_json);
         }
-      } catch {
+      } catch (e) {
         pags = [];
       }
 
-      if (pags.length === 0 && inv.xml_raw) {
-        const xml = String(inv.xml_raw);
+      if (!pags || pags.length === 0) {
+        const xml = inv.xml_raw || '';
         const detPags = xml.match(/<detPag>[\s\S]*?<\/detPag>/g) || [];
         for (const dp of detPags) {
-          const t = (dp.match(/<tPag>(\d+)<\/tPag>/) || [])[1] || '99';
-          const v = parseFloat((dp.match(/<vPag>([\d.]+)<\/vPag>/) || [])[1] || '0');
+          const t = dp.match(/<tPag>(\d+)<\/tPag>/)?.[1] || '99';
+          const v = parseFloat(dp.match(/<vPag>([\d\.]+)<\/vPag>/)?.[1] || vnf.toString());
           pags.push({ forma: t, valor: v });
         }
       }
 
       if (pags.length === 0) {
-        bucket.outrosNota += valorTotal;
-      } else {
-        for (const p of pags) {
-          const code = String(p.forma || p.tPag || '99').padStart(2, '0');
-          const val = Number(p.valor ?? p.vPag) || 0;
-          if (code === '03') bucket.credito += val;
-          else if (code === '04') bucket.debito += val;
-          else if (code === '17' || code === '20') bucket.pixNota += val;
-          else if (code === '15') bucket.boleto += val;
-          else if (code === '01') bucket.dinheiro += val;
-          else bucket.outrosNota += val;
+        pags.push({ forma: '99', valor: vnf });
+      }
+
+      for (const p of pags) {
+        const t = p.forma || p.tPag || '99';
+        const v = Number(p.valor || p.vPag) || 0;
+
+        if (t === '01') {
+          item.modalidadesNota.dinheiro += v;
+        } else if (t === '03') {
+          item.modalidadesNota.credito += v;
+          item.modalidadesNota.qtdCredito += 1;
+        } else if (t === '04') {
+          item.modalidadesNota.debito += v;
+          item.modalidadesNota.qtdDebito += 1;
+        } else if (t === '15') {
+          item.modalidadesNota.boleto += v;
+        } else if (t === '17' || t === '20') {
+          item.modalidadesNota.pix += v;
+          item.modalidadesNota.qtdPix += 1;
+        } else {
+          item.modalidadesNota.outros += v;
         }
       }
     }
 
-    for (const bt of transactions) {
-      const rawDate = String(bt.data || '').slice(0, 7);
-      const mes = /^\d{4}-\d{2}$/.test(rawDate) ? rawDate : 'Sem Data';
-      const bucket = ensureMonth(mes);
-      bucket.bankTxCount += 1;
+    // Process Bank Transactions
+    for (const bt of bankTxs) {
+      const ym = (bt.data || '').substring(0, 7);
+      if (!monthlyMap[ym]) continue;
 
-      if (bt.tipo !== 'CREDITO') continue;
+      const item = monthlyMap[ym];
+      item.extratoBancoStatus = 'ENTROU';
+
+      const memo = (bt.descricao_original || '').toUpperCase();
       const val = Number(bt.valor) || 0;
-      const memo = String(bt.descricao_original || '').toUpperCase();
 
-      if (memo.includes('CIELO')) {
-        bucket.cielo += val;
-        bucket.cardTxCount += 1;
-      } else if (memo.includes('REDE') && (memo.includes(' AT') || memo.includes('ANTECIP'))) {
-        bucket.redeAt += val;
-        bucket.cardTxCount += 1;
-      } else if (
-        memo.includes('REDE') ||
-        memo.includes(' DB0') ||
-        memo.includes('STONE') ||
-        memo.includes('GETNET') ||
-        memo.includes('CARTAO')
-      ) {
-        bucket.redeDb += val;
-        bucket.cardTxCount += 1;
-      } else if (memo.includes('PIX')) {
-        bucket.pixBanco += val;
-      } else {
-        bucket.outrosBanco += val;
+      if (bt.tipo === 'CREDITO') {
+        item.realBanco.totalCreditos += val;
+
+        const isCielo = memo.includes('CIELO');
+        const isRedeAt = memo.includes(' AT0') || memo.includes('AT ') || (memo.includes('REDE') && memo.includes('AT')) || memo.includes('ANTECIP');
+        const isRedeDb = memo.includes(' DB0') || memo.includes('DB ') || (memo.includes('REDE') && memo.includes('DB'));
+        const isPix = memo.includes('PIX') && !isCielo && !memo.includes('REDE');
+
+        if (isRedeAt) {
+          item.realBanco.redeAt += val;
+          item.realBanco.qtdRedeAt += 1;
+          item.extratoMaquininhaStatus = 'ENTROU';
+        } else if (isRedeDb) {
+          item.realBanco.redeDb += val;
+          item.realBanco.qtdRedeDb += 1;
+          item.extratoMaquininhaStatus = 'ENTROU';
+        } else if (isCielo) {
+          item.realBanco.cielo += val;
+          item.realBanco.qtdCielo += 1;
+          item.extratoMaquininhaStatus = 'ENTROU';
+        } else if (isPix) {
+          item.realBanco.pix += val;
+          item.realBanco.qtdPix += 1;
+        } else {
+          item.realBanco.outrosCreditos += val;
+        }
       }
     }
 
-    const sortedMonths = Array.from(months.values()).sort((a, b) => a.mes.localeCompare(b.mes));
+    // Calculate reconciliations and indicators
+    const monthlyList: CardModalityMonthAudit[] = [];
+    let totCartaoNota = 0;
+    let totCartaoMaq = 0;
+    let totRedeAt = 0;
+    let totPixNota = 0;
+    let totPixBanco = 0;
+    let totFaturado = 0;
 
-    let totalFaturadoGeral = 0;
-    let totalCredito = 0;
-    let totalDebito = 0;
-    let totalPixNota = 0;
-    let totalBoleto = 0;
-    let totalDinheiro = 0;
-    let totalOutrosNota = 0;
+    const modTotais = { dinheiro: 0, credito: 0, debito: 0, pix: 0, boleto: 0, outros: 0 };
+    const bankTotais = { pix: 0, redeAt: 0, redeDb: 0, cielo: 0, outros: 0, total: 0 };
 
-    let totalPixBanco = 0;
-    let totalRedeAt = 0;
-    let totalRedeDb = 0;
-    let totalCielo = 0;
-    let totalOutrosBanco = 0;
+    for (const m of months) {
+      const item = monthlyMap[m];
+      item.realBanco.totalMaquininhas = item.realBanco.redeAt + item.realBanco.redeDb + item.realBanco.cielo;
 
-    const monthlyAudit = sortedMonths.map(b => {
-      const notaCartao = round2(b.credito + b.debito);
-      const maquininhaReal = round2(b.redeAt + b.redeDb + b.cielo);
-      const divergenciaCartao = round2(maquininhaReal - notaCartao);
-      const taxaAderencia = notaCartao > 0
-        ? Math.min(100, Math.round((maquininhaReal / notaCartao) * 1000) / 10)
-        : (maquininhaReal === 0 ? 100 : 0);
-      const status = taxaAderencia >= 90 ? 'CONCILIADO' : taxaAderencia >= 70 ? 'ATENCAO' : 'DIVERGENTE';
+      const notaCartao = item.modalidadesNota.credito + item.modalidadesNota.debito;
+      const maqReal = item.realBanco.totalMaquininhas;
+      const diffCartao = maqReal - notaCartao;
+      const taxaAderencia = notaCartao > 0 ? Math.min(100, Math.round((Math.min(notaCartao, maqReal) / Math.max(notaCartao, maqReal)) * 100)) : (maqReal === 0 ? 100 : 0);
 
-      const notaPix = round2(b.pixNota);
-      const bancoPix = round2(b.pixBanco);
-      const divergenciaPix = round2(bancoPix - notaPix);
-
-      totalFaturadoGeral += b.faturamentoTotal;
-      totalCredito += b.credito;
-      totalDebito += b.debito;
-      totalPixNota += b.pixNota;
-      totalBoleto += b.boleto;
-      totalDinheiro += b.dinheiro;
-      totalOutrosNota += b.outrosNota;
-
-      totalPixBanco += b.pixBanco;
-      totalRedeAt += b.redeAt;
-      totalRedeDb += b.redeDb;
-      totalCielo += b.cielo;
-      totalOutrosBanco += b.outrosBanco;
-
-      return {
-        mes: b.mes,
-        extratoBancoStatus: b.bankTxCount > 0 ? 'ENTROU' : 'PENDENTE',
-        extratoMaquininhaStatus: b.cardTxCount > 0 ? 'ENTROU' : 'PENDENTE',
-        faturamentoTotal: round2(b.faturamentoTotal),
-        confrontoCartao: {
-          notaCartao,
-          maquininhaReal,
-          divergencia: divergenciaCartao,
-          taxaAderencia,
-          status
-        },
-        realBanco: {
-          redeAt: round2(b.redeAt),
-          redeDb: round2(b.redeDb),
-          cielo: round2(b.cielo),
-          pix: bancoPix,
-          outros: round2(b.outrosBanco)
-        },
-        confrontoPix: {
-          notaPix,
-          bancoPix,
-          divergencia: divergenciaPix
-        }
+      item.confrontoCartao = {
+        notaCartao,
+        maquininhaReal: maqReal,
+        divergencia: diffCartao,
+        taxaAderencia,
+        status: Math.abs(diffCartao) < 1500 ? 'CONCILIADO' : (diffCartao > 0 ? 'CRITICO' : 'ATENCAO')
       };
-    });
 
-    const totalCartoesNota = round2(totalCredito + totalDebito);
-    const totalCartoesRealMaquininha = round2(totalRedeAt + totalRedeDb + totalCielo);
-    const taxaAderenciaCartoes = totalCartoesNota > 0
-      ? Math.min(100, Math.round((totalCartoesRealMaquininha / totalCartoesNota) * 1000) / 10)
-      : (totalCartoesRealMaquininha === 0 ? 100 : 0);
+      const notaPix = item.modalidadesNota.pix;
+      const bancoPix = item.realBanco.pix;
+      const diffPix = bancoPix - notaPix;
 
-    const totalBancoGeral = round2(totalPixBanco + totalRedeAt + totalRedeDb + totalCielo + totalOutrosBanco);
+      item.confrontoPix = {
+        notaPix,
+        bancoPix,
+        divergencia: diffPix,
+        status: diffPix > 5000 ? 'RISCO_OMISSAO' : 'CONCILIADO'
+      };
+
+      totCartaoNota += notaCartao;
+      totCartaoMaq += maqReal;
+      totRedeAt += item.realBanco.redeAt;
+      totPixNota += notaPix;
+      totPixBanco += bancoPix;
+      totFaturado += item.faturamentoTotal;
+
+      modTotais.dinheiro += item.modalidadesNota.dinheiro;
+      modTotais.credito += item.modalidadesNota.credito;
+      modTotais.debito += item.modalidadesNota.debito;
+      modTotais.pix += item.modalidadesNota.pix;
+      modTotais.boleto += item.modalidadesNota.boleto;
+      modTotais.outros += item.modalidadesNota.outros;
+
+      bankTotais.pix += item.realBanco.pix;
+      bankTotais.redeAt += item.realBanco.redeAt;
+      bankTotais.redeDb += item.realBanco.redeDb;
+      bankTotais.cielo += item.realBanco.cielo;
+      bankTotais.outros += item.realBanco.outrosCreditos;
+      bankTotais.total += item.realBanco.totalCreditos;
+
+      monthlyList.push(item);
+    }
 
     return {
-      success: true,
+      company: comp,
       kpis: {
-        totalCartoesNota,
-        totalCartoesRealMaquininha,
-        taxaAderenciaCartoes,
-        totalAntecipacoesPagas: round2(totalRedeAt),
-        desagioEstimadoAntecipacao: round2(totalRedeAt * 0.032),
-        totalFaturadoGeral: round2(totalFaturadoGeral),
-        totalPixNota: round2(totalPixNota),
-        totalPixBanco: round2(totalPixBanco),
-        divergenciaPix: round2(totalPixBanco - totalPixNota)
+        totalCartoesNota: totCartaoNota,
+        totalCartoesRealMaquininha: totCartaoMaq,
+        divergenciaCartoes: totCartaoMaq - totCartaoNota,
+        taxaAderenciaCartoes: totCartaoNota > 0 ? Math.round((totCartaoMaq / totCartaoNota) * 1000) / 10 : 0,
+        totalAntecipacoesPagas: totRedeAt,
+        desagioEstimadoAntecipacao: totRedeAt * 0.0385,
+        totalPixNota: totPixNota,
+        totalPixBanco: totPixBanco,
+        divergenciaPix: totPixBanco - totPixNota,
+        totalFaturadoGeral: totFaturado
       },
-      modalidadesTotais: {
-        credito: round2(totalCredito),
-        debito: round2(totalDebito),
-        pix: round2(totalPixNota),
-        boleto: round2(totalBoleto),
-        dinheiro: round2(totalDinheiro),
-        outros: round2(totalOutrosNota)
-      },
-      bancoTotais: {
-        pix: round2(totalPixBanco),
-        redeAt: round2(totalRedeAt),
-        redeDb: round2(totalRedeDb),
-        cielo: round2(totalCielo),
-        outros: round2(totalOutrosBanco),
-        total: totalBancoGeral
-      },
-      monthlyAudit
+      modalidadesTotais: modTotais,
+      bancoTotais: bankTotais,
+      monthlyAudit: monthlyList
     };
   }
 };
