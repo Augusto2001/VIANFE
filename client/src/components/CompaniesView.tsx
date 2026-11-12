@@ -46,6 +46,7 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
   currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [certFilter, setCertFilter] = useState<'all' | 'valid' | 'expiring' | 'expired' | 'none'>('all');
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
   // Form State for Create/Edit
@@ -256,11 +257,83 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
     }
   };
 
-  const filtered = companies.filter(c => 
-    c.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.cnpj.includes(searchTerm.replace(/\D/g, '')) ||
-    (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const getCertStatus = (comp: Company) => {
+    if (!comp.cert_filename && !comp.cert_valid_until) {
+      return { 
+        status: 'none', 
+        label: '+ Certificado A1', 
+        badgeClass: 'text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30',
+        icon: Key
+      };
+    }
+    if (!comp.cert_valid_until) {
+      return { 
+        status: 'valid', 
+        label: 'A1 Ativo', 
+        badgeClass: 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20',
+        icon: Shield 
+      };
+    }
+    const expDate = new Date(comp.cert_valid_until);
+    const now = new Date();
+    const diffDays = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const dateFormatted = expDate.toLocaleDateString('pt-BR');
+
+    if (diffDays < 0) {
+      return { 
+        status: 'expired', 
+        label: `A1 Expirado (${dateFormatted})`, 
+        badgeClass: 'text-rose-400 bg-rose-500/10 border border-rose-500/40',
+        icon: AlertCircle
+      };
+    } else if (diffDays <= 30) {
+      return { 
+        status: 'expiring', 
+        label: `A1 Vence em ${diffDays}d (${dateFormatted})`, 
+        badgeClass: 'text-amber-300 bg-amber-500/10 border border-amber-500/40',
+        icon: Clock
+      };
+    } else {
+      return { 
+        status: 'valid', 
+        label: `A1 Válido até ${dateFormatted}`, 
+        badgeClass: 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/30',
+        icon: Shield
+      };
+    }
+  };
+
+  const validCertsCount = companies.filter(c => c.cert_valid_until && new Date(c.cert_valid_until) > new Date()).length;
+  const expiringCertsCount = companies.filter(c => {
+    if (!c.cert_valid_until) return false;
+    const diff = Math.ceil((new Date(c.cert_valid_until).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    return diff > 0 && diff <= 30;
+  }).length;
+  const expiredCertsCount = companies.filter(c => c.cert_valid_until && new Date(c.cert_valid_until) <= new Date()).length;
+  const noneCertsCount = companies.filter(c => !c.cert_filename && !c.cert_valid_until).length;
+  const filtered = companies.filter(c => {
+    const matchesSearch = c.razao_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.cnpj.includes(searchTerm.replace(/\D/g, '')) ||
+      (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    if (!matchesSearch) return false;
+
+    if (certFilter === 'valid') {
+      return c.cert_valid_until && new Date(c.cert_valid_until) > new Date();
+    }
+    if (certFilter === 'expiring') {
+      if (!c.cert_valid_until) return false;
+      const diff = Math.ceil((new Date(c.cert_valid_until).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      return diff > 0 && diff <= 30;
+    }
+    if (certFilter === 'expired') {
+      return c.cert_valid_until && new Date(c.cert_valid_until) <= new Date();
+    }
+    if (certFilter === 'none') {
+      return !c.cert_filename && !c.cert_valid_until;
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -289,19 +362,94 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
       </div>
 
       {/* Search Filter Bar */}
-      <div className="glass-panel p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar empresa por Razão Social, Nome Fantasia ou CNPJ..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:border-brand-500"
-          />
+      <div className="glass-panel p-3.5 rounded-2xl border border-slate-800 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar empresa por Razão Social, Nome Fantasia ou CNPJ..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+          <div className="text-xs text-slate-400 font-mono shrink-0">
+            Exibindo: <strong className="text-white">{filtered.length}</strong> de {companies.length}
+          </div>
         </div>
-        <div className="text-xs text-slate-400 font-mono">
-          Total: <strong className="text-white">{filtered.length}</strong> empresa(s)
+
+        {/* Quick Certificate Status Filters */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-800/80 text-xs">
+          <span className="text-[11px] font-semibold text-slate-400 mr-1 flex items-center gap-1">
+            <Shield className="w-3.5 h-3.5 text-brand-400" />
+            Filtro Certificados A1:
+          </span>
+          <button
+            type="button"
+            onClick={() => setCertFilter('all')}
+            className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all ${
+              certFilter === 'all'
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
+            }`}
+          >
+            Todas ({companies.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setCertFilter('valid')}
+            className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all flex items-center gap-1 ${
+              certFilter === 'valid'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-slate-800'
+            }`}
+          >
+            <Shield className="w-3 h-3 text-emerald-400" />
+            Válidos 2026/27 ({validCertsCount})
+          </button>
+          {expiringCertsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setCertFilter('expiring')}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all flex items-center gap-1 ${
+                certFilter === 'expiring'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800'
+              }`}
+            >
+              <Clock className="w-3 h-3 text-amber-300" />
+              Vencendo em 30d ({expiringCertsCount})
+            </button>
+          )}
+          {expiredCertsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setCertFilter('expired')}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all flex items-center gap-1 ${
+                certFilter === 'expired'
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : 'bg-slate-900 hover:bg-slate-800 text-rose-400 border border-slate-800'
+              }`}
+            >
+              <AlertCircle className="w-3 h-3 text-rose-400" />
+              Expirados ({expiredCertsCount})
+            </button>
+          )}
+          {noneCertsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setCertFilter('none')}
+              className={`px-2.5 py-1 rounded-lg font-medium text-[11px] transition-all flex items-center gap-1 ${
+                certFilter === 'none'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800'
+              }`}
+            >
+              <Key className="w-3 h-3 text-slate-400" />
+              Sem Certificado ({noneCertsCount})
+            </button>
+          )}
         </div>
       </div>
 
@@ -344,21 +492,21 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
                     </div>
                     
                     <div className="flex items-center gap-1.5">
-                      {comp.cert_filename ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-medium" title="Certificado A1 configurado">
-                          <Shield className="w-3.5 h-3.5" />
-                          A1 Ativo
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setCertModalCompany(comp)}
-                          className="inline-flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 font-medium bg-amber-500/10 px-2 py-0.5 rounded"
-                          title="Fazer upload do Certificado A1"
-                        >
-                          <Key className="w-3 h-3" />
-                          + Certificado A1
-                        </button>
-                      )}
+                      {(() => {
+                        const cert = getCertStatus(comp);
+                        const IconComp = cert.icon;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => setCertModalCompany(comp)}
+                            className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-all hover:opacity-90 ${cert.badgeClass}`}
+                            title={`Certificado A1: ${cert.label} - Clique para gerenciar`}
+                          >
+                            <IconComp className="w-3 h-3 shrink-0" />
+                            <span>{cert.label}</span>
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -787,6 +935,39 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({
                 </div>
               </div>
               <button onClick={() => setCertModalCompany(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            {/* Informações Atuais da Validade */}
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Validade Atual no Sistema:</span>
+                {certModalCompany.cert_valid_until ? (
+                  <span className={`font-semibold font-mono flex items-center gap-1 ${
+                    new Date(certModalCompany.cert_valid_until) > new Date() ? 'text-emerald-400' : 'text-rose-400'
+                  }`}>
+                    {new Date(certModalCompany.cert_valid_until) > new Date() ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                    )}
+                    {new Date(certModalCompany.cert_valid_until).toLocaleDateString('pt-BR')}
+                    {new Date(certModalCompany.cert_valid_until) > new Date() ? ' (Válido / Vigente)' : ' (Expirado)'}
+                  </span>
+                ) : (
+                  <span className="text-amber-400 font-semibold flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Pendente / Não cadastrado
+                  </span>
+                )}
+              </div>
+              {certModalCompany.cert_filename && (
+                <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800/60 pt-1.5">
+                  <span>Arquivo Configurado:</span>
+                  <span className="font-mono text-slate-300 truncate max-w-[210px]" title={certModalCompany.cert_filename}>
+                    {certModalCompany.cert_filename}
+                  </span>
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleUploadCert} className="space-y-4 text-xs">

@@ -69,6 +69,8 @@ router.post('/invoices/sync-morning', verifyJwtAndTenant, invoiceController.sync
 
 // BPO Financeiro & Conciliação Bancária Lado a Lado
 router.get('/bpo/accounts', verifyJwtAndTenant, bpoController.getAccounts);
+router.get('/bpo/installments', verifyJwtAndTenant, bpoController.getInstallments);
+router.get('/bpo/tax-forecasts', verifyJwtAndTenant, bpoController.getTaxForecasts);
 router.post('/bpo/accounts', verifyJwtAndTenant, bpoController.createAccount);
 router.post('/bpo/upload-statement', verifyJwtAndTenant, bpoController.uploadStatement);
 router.get('/bpo/transactions', verifyJwtAndTenant, bpoController.getTransactions);
@@ -169,6 +171,8 @@ import { whatsappService } from '../services/whatsappService.js';
 
 // Tax Audit & Oportunidades Tributárias (Monofásicos, NCM, CFOP)
 router.get('/tax-audit/summary', verifyJwtAndTenant, taxAuditController.getAuditSummary);
+router.get('/tax-audit/cards-modalities', verifyJwtAndTenant, taxAuditController.getCardAndModalityAudit);
+router.get('/analytics/cards-modalities', verifyJwtAndTenant, taxAuditController.getCardAndModalityAudit);
 
 // WhatsApp ZapCont Safe Notifications
 router.post('/notifications/whatsapp-send', verifyJwtAndTenant, async (req, res) => {

@@ -306,10 +306,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Entradas */}
+        {/* Entradas (Compras para Revenda x Serviços Tomados) */}
         <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Notas Recebidas (Entradas)</span>
+            <span>
+              {selectedCompany?.emite_nfse && !selectedCompany?.ie
+                ? 'Serviços Tomados (NFS-e)'
+                : selectedCompany?.emite_nfse && selectedCompany?.ie
+                ? 'Entradas (Produtos & Serviços)'
+                : 'Compras para Revenda (Entradas)'}
+            </span>
             <span className="p-1 rounded bg-blue-500/10 text-blue-300">
               <ArrowDownLeft className="w-3.5 h-3.5" />
             </span>
@@ -317,13 +323,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="text-2xl font-bold text-slate-100">
             {formatCurrency(summary.valorEntradas)}
           </div>
-          <p className="text-[11px] text-slate-400">Compras e insumos de fornecedores</p>
+          <p className="text-[11px] text-slate-400">
+            {selectedCompany?.emite_nfse && !selectedCompany?.ie
+              ? 'Serviços de terceiros e insumos tomados'
+              : selectedCompany?.emite_nfse && selectedCompany?.ie
+              ? 'Compras para revenda e serviços tomados'
+              : 'Compras de produtos para revenda (NF-e)'}
+          </p>
         </div>
 
-        {/* Saídas */}
+        {/* Saídas (Vendas de Produtos x Serviços Prestados) */}
         <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Notas Emitidas (Saídas)</span>
+            <span>
+              {selectedCompany?.emite_nfse && !selectedCompany?.ie
+                ? 'Serviços Prestados (NFS-e)'
+                : selectedCompany?.emite_nfse && selectedCompany?.ie
+                ? 'Faturamento (Vendas & Serviços)'
+                : 'Vendas de Produtos (Saídas)'}
+            </span>
             <span className="p-1 rounded bg-amber-500/10 text-amber-300">
               <ArrowUpRight className="w-3.5 h-3.5" />
             </span>
@@ -331,7 +349,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="text-2xl font-bold text-slate-100">
             {formatCurrency(summary.valorSaidas)}
           </div>
-          <p className="text-[11px] text-slate-400">Faturamento e vendas da empresa</p>
+          <p className="text-[11px] text-slate-400">
+            {selectedCompany?.emite_nfse && !selectedCompany?.ie
+              ? 'Faturamento e notas de serviços prestados'
+              : selectedCompany?.emite_nfse && selectedCompany?.ie
+              ? 'Vendas de mercadorias e prestação de serviços'
+              : 'Faturamento de vendas mercantis (NF-e/NFC-e)'}
+          </p>
         </div>
 
         {/* Google Drive Status */}

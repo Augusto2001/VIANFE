@@ -14,6 +14,10 @@ interface BusinessSuccessDashboardProps {
 export const BusinessSuccessDashboard: React.FC<BusinessSuccessDashboardProps> = ({ company }) => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const formatCurrency = (val: number) =>
+    (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [targetPhone, setTargetPhone] = useState('55');
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
@@ -26,13 +30,17 @@ export const BusinessSuccessDashboard: React.FC<BusinessSuccessDashboardProps> =
     const currentCompId = company.id;
     try {
       setLoading(true);
+      setErrorMsg(null);
       const res = await api.getBusinessSuccess(company.id);
       if (activeCompanyIdRef.current !== currentCompId) {
-        return; // Discard stale response from prior company
+        return;
       }
       setData(res);
     } catch (err: any) {
       console.error('Erro ao carregar Painel do Sucesso:', err);
+      if (activeCompanyIdRef.current === currentCompId) {
+        setErrorMsg(err?.message || 'Não foi possível calcular os indicadores no momento.');
+      }
     } finally {
       if (activeCompanyIdRef.current === currentCompId) {
         setLoading(false);
@@ -42,16 +50,33 @@ export const BusinessSuccessDashboard: React.FC<BusinessSuccessDashboardProps> =
 
   useEffect(() => {
     activeCompanyIdRef.current = company.id;
-    setData(null); // Immediate state reset to prevent displaying previous company's KPIs
+    setData(null);
+    setErrorMsg(null);
     loadKpis();
   }, [company.id]);
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
         <Activity className="w-8 h-8 text-emerald-400 animate-spin mx-auto" />
         <h3 className="text-sm font-bold text-white">Calculando +30 KPIs e Auditoria Fiscal em Tempo Real...</h3>
         <p className="text-xs text-slate-400">Processando notas SEFAZ, extratos bancários e fechamento gerencial.</p>
+      </div>
+    );
+  }
+
+  if (errorMsg || !data) {
+    return (
+      <div className="bg-slate-900 border border-rose-800/50 rounded-2xl p-10 text-center space-y-4">
+        <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
+        <h3 className="text-sm font-bold text-white">Aviso ao carregar os 30 KPIs</h3>
+        <p className="text-xs text-slate-400">{errorMsg || 'Selecione uma empresa ativa para recarregar.'}</p>
+        <button
+          onClick={loadKpis}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all"
+        >
+          Recalcular Agora
+        </button>
       </div>
     );
   }
@@ -410,6 +435,45 @@ export const BusinessSuccessDashboard: React.FC<BusinessSuccessDashboardProps> =
         </div>
 
       </div>
+
+      {/* ========================================================================= */}
+      {/* 4. PAINEL COMPLETO DOS 30 KPIS EXECUTIVOS, FISCAIS E FINANCEIROS          */}
+      {/* ========================================================================= */}
+      {Array.isArray(data.catalogo30Kpis) && data.catalogo30Kpis.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-emerald-400" />
+                <span>Consultor Completo dos 30 KPIs ({company.nome_fantasia || company.razao_social})</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Indicadores calculados sobre a movimentação oficial de notas fiscais (NF-e / NFC-e), SEFAZ-BA e DRE Gerencial
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold font-mono">
+              30 KPIs Ativos
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {data.catalogo30Kpis.map((item: any) => (
+              <div
+                key={item.id}
+                className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90 hover:border-emerald-500/40 transition-all flex flex-col justify-between space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span className="uppercase text-emerald-400 font-bold">KPI #{String(item.id).padStart(2, '0')}</span>
+                  <span className="truncate max-w-[130px]">{item.categoria}</span>
+                </div>
+                <div className="text-xs font-bold text-slate-200 leading-snug">{item.nome}</div>
+                <div className="text-base font-black text-white font-mono pt-0.5">{item.valor}</div>
+                <div className="text-[10px] text-slate-400 truncate">{item.detalhe}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL: SAFE WHATSAPP ZAPCONT SENDER */}

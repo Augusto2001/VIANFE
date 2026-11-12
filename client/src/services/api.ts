@@ -552,6 +552,11 @@ export const api = {
   },
 
   // Tax Audit & Recuperação Tributária
+  async getCardAndModalityAudit(companyId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/tax-audit/cards-modalities?company_id=${companyId}`, { headers: getAuthHeaders() });
+    return await res.json();
+  },
+
   async getTaxAuditSummary(companyId: string): Promise<any> {
     const res = await fetch(`${API_BASE}/tax-audit/summary?company_id=${companyId}`, { headers: getAuthHeaders() });
     const json = await res.json();
