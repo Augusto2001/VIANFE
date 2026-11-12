@@ -25,13 +25,13 @@ export const bpoController = {
   // 1. List bank accounts
   async getAccounts(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const accounts = db.prepare('SELECT * FROM bank_accounts WHERE company_id = ? ORDER BY banco_nome ASC').all(company_id as string) as any[];
+      const accounts = db.prepare('SELECT * FROM bank_accounts WHERE company_id = ? ORDER BY banco_nome ASC').all(companyId) as any[];
 
       res.json({ success: true, data: accounts });
     } catch (err: any) {
@@ -244,13 +244,14 @@ export const bpoController = {
   // 4. List transactions with smart matches
   async getTransactions(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, status } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      if (!canAccessCompany(req, res, company_id)) return;
+      if (!canAccessCompany(req, res, companyId)) return;
 
       let sql = `
         SELECT 
@@ -271,7 +272,7 @@ export const bpoController = {
         WHERE t.company_id = ?
       `;
 
-      const params: any[] = [company_id];
+      const params: any[] = [companyId];
 
       if (status === 'pending') {
         sql += ' AND (t.conciliado = 0 OR t.conciliado IS NULL)';
@@ -285,7 +286,7 @@ export const bpoController = {
 
       res.json({
         success: true,
-        summary: reconciliationSummary(db, String(company_id)),
+        summary: reconciliationSummary(db, companyId),
         data: transactions
       });
     } catch (err: any) {
@@ -439,15 +440,15 @@ export const bpoController = {
   // 7. BUSINESS SUCCESS DASHBOARD & RISK RADAR (+30 KPIs & Real-Time Closing)
   async getBusinessSuccessKpis(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, month, year } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const invoices = db.prepare('SELECT * FROM invoices WHERE company_id = ?').all(company_id as string) as any[];
-      const transactions = db.prepare('SELECT * FROM bank_transactions WHERE company_id = ?').all(company_id as string) as any[];
-      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(company_id as string) as any;
+      const invoices = db.prepare('SELECT * FROM invoices WHERE company_id = ?').all(companyId) as any[];
+      const transactions = db.prepare('SELECT * FROM bank_transactions WHERE company_id = ?').all(companyId) as any[];
+      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
 
       const isCompanyComercio = !(company && company.emite_nfse && !company.ie);
 
@@ -757,21 +758,21 @@ export const bpoController = {
   // 8. EXPORTADOR DE LOTES CONTÁBEIS DOMÍNIO SISTEMAS
   async exportDominioBatches(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      if (!canAccessCompany(req, res, company_id)) return;
-      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(company_id as string) as any;
+      if (!canAccessCompany(req, res, companyId)) return;
+      const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
       const transactions = db.prepare(`
         SELECT t.*, c.conta_debito_dominio, c.conta_credito_dominio, c.nome as cat_nome
         FROM bank_transactions t
         LEFT JOIN financial_categories c ON t.categoria_id = c.id
         WHERE t.company_id = ? AND t.conciliado = 1
         ORDER BY t.data ASC
-      `).all(company_id as string) as any[];
+      `).all(companyId) as any[];
 
       const missingMappings = transactions.filter(t => !t.conta_debito_dominio || !t.conta_credito_dominio);
       if (missingMappings.length) {
@@ -798,7 +799,7 @@ export const bpoController = {
         SELECT * FROM accounting_provisions
         WHERE company_id = ?
         ORDER BY data_lancamento ASC
-      `).all(company_id as string) as any[];
+      `).all(companyId) as any[];
 
       for (const p of provisions) {
         const dataFormatada = p.data_lancamento.split('-').reverse().join('/');
@@ -964,13 +965,13 @@ export const bpoController = {
 
   async getChartOfAccounts(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const accounts = db.prepare('SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? ORDER BY classificacao ASC').all(company_id as string);
+      const accounts = db.prepare('SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? ORDER BY classificacao ASC').all(companyId);
       res.json({ success: true, data: accounts });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1065,13 +1066,13 @@ export const bpoController = {
 
   async getProvisions(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const provisions = db.prepare('SELECT * FROM accounting_provisions WHERE company_id = ? ORDER BY data_lancamento DESC').all(company_id as string);
+      const provisions = db.prepare('SELECT * FROM accounting_provisions WHERE company_id = ? ORDER BY data_lancamento DESC').all(companyId);
       res.json({ success: true, data: provisions });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1081,14 +1082,15 @@ export const bpoController = {
   // 12. RADAR DE ALERTAS PREDITIVOS (48H ANTES DO VENCIMENTO)
   async getUpcomingAlerts(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, days_ahead } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      const daysAhead = typeof req.query.days_ahead === 'string' ? req.query.days_ahead.trim() : '';
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const days = days_ahead ? parseInt(days_ahead as string, 10) : 2;
-      const data = await predictiveAlertsService.getUpcomingDueItems(company_id as string, days);
+      const days = daysAhead ? parseInt(daysAhead, 10) : 2;
+      const data = await predictiveAlertsService.getUpcomingDueItems(companyId, days);
       res.json({ success: true, data });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1112,14 +1114,15 @@ export const bpoController = {
 
   async getAlertsHistory(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, limit } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      const limitStr = typeof req.query.limit === 'string' ? req.query.limit.trim() : '';
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
-      const l = limit ? parseInt(limit as string, 10) : 20;
-      const history = predictiveAlertsService.getAlertsHistory(company_id as string, l);
+      const l = limitStr ? parseInt(limitStr, 10) : 20;
+      const history = predictiveAlertsService.getAlertsHistory(companyId, l);
       res.json({ success: true, data: history });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1129,7 +1132,7 @@ export const bpoController = {
   // 13. OPEN FINANCE PLUG & PLAY & WEBHOOKS BANCÁRIOS
   async handleOpenFinanceWebhook(req: Request, res: Response): Promise<void> {
     try {
-      const companyId = String(req.params.companyId || req.query.company_id || '');
+      const companyId = String(req.params.companyId || req.query.company_id || '').trim();
       if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório para ingestão Open Finance' });
         return;
@@ -1148,20 +1151,20 @@ export const bpoController = {
 
   async getOpenFinanceInfo(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
       const host = req.get('host') || 'vianfe.contadordev.com.br';
       const protocol = req.protocol === 'http' && !req.secure && host.includes('localhost') ? 'http' : 'https';
-      const webhookUrl = `${protocol}://${host}/api/bpo/open-finance/webhook/${company_id}`;
+      const webhookUrl = `${protocol}://${host}/api/bpo/open-finance/webhook/${companyId}`;
       const totalTransactions = db.prepare(`
         SELECT count(*) as count, max(created_at) as last_sync 
         FROM bank_transactions 
         WHERE company_id = ? AND observacoes_cliente LIKE '%Open Finance%'
-      `).get(company_id as string) as any;
+      `).get(companyId) as any;
 
       res.json({
         success: true,
@@ -1227,13 +1230,15 @@ export const bpoController = {
 
   async getInstallments(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, tipo = 'pagar', status } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      const tipo = typeof req.query.tipo === 'string' ? req.query.tipo.trim() : 'pagar';
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
       let sql = 'SELECT * FROM invoice_installments WHERE company_id = ?';
-      const params: any[] = [company_id];
+      const params: string[] = [companyId];
       if (tipo && tipo !== 'all') {
         sql += ' AND tipo = ?';
         params.push(tipo);
@@ -1252,18 +1257,19 @@ export const bpoController = {
 
   async getTaxForecasts(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id, month } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      const month = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+      if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
-      const refMonth = (month as string) || new Date().toISOString().slice(0, 7);
+      const refMonth = month || new Date().toISOString().slice(0, 7);
 
       const salesQuery = db.prepare(`
         SELECT sum(valor_total) as total_vendas, count(*) as count_notas
         FROM invoices
         WHERE company_id = ? AND tipo = 'saida' AND data_emissao LIKE ?
-      `).get(company_id, `${refMonth}%`) as any;
+      `).get(companyId, `${refMonth}%`) as any;
 
       const totalVendas = Number(salesQuery?.total_vendas) || 0;
       const countVendas = Number(salesQuery?.count_notas) || 0;
@@ -1276,7 +1282,7 @@ export const bpoController = {
         FROM invoices
         WHERE company_id = ? AND tipo = 'entrada' AND emitente_uf != 'BA' AND data_emissao LIKE ?
         ORDER BY data_emissao DESC
-      `).all(company_id, `${refMonth}%`) as any[];
+      `).all(companyId, `${refMonth}%`) as any[];
 
       const aliqInternaBa = 0.205;
       const notasAntecipacao: any[] = [];

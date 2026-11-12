@@ -8,13 +8,13 @@ export const taxAuditController = {
    */
   async getAuditSummary(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ success: false, message: 'company_id é obrigatório' });
         return;
       }
 
-      const auditData = await taxAuditorService.auditCompanyInvoices(company_id as string);
+      const auditData = await taxAuditorService.auditCompanyInvoices(companyId);
       res.json(auditData);
     } catch (err: any) {
       console.error('Tax audit error:', err);
@@ -27,13 +27,13 @@ export const taxAuditController = {
    */
   async getCardAndModalityAudit(req: Request, res: Response): Promise<void> {
     try {
-      const { company_id } = req.query;
-      if (!company_id) {
+      const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
+      if (!companyId) {
         res.status(400).json({ success: false, message: 'company_id é obrigatório' });
         return;
       }
 
-      const result = cardAuditService.getCompanyCardAndModalityAudit(company_id as string);
+      const result = cardAuditService.getCompanyCardAndModalityAudit(companyId);
       res.json(result);
     } catch (err: any) {
       console.error('Card & Modality audit error:', err);
