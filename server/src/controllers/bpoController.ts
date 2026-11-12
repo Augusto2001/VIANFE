@@ -245,13 +245,82 @@ export const bpoController = {
   async getTransactions(req: Request, res: Response): Promise<void> {
     try {
       const companyId = typeof req.query.company_id === 'string' ? req.query.company_id.trim() : String(req.query.company_id ?? '').trim();
-      const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status.trim().toLowerCase() : undefined;
       if (!companyId) {
         res.status(400).json({ error: 'company_id é obrigatório' });
         return;
       }
 
       if (!canAccessCompany(req, res, companyId)) return;
+
+      const normalizeDateParam = (val: unknown): string | undefined => {
+        if (typeof val !== 'string') return undefined;
+        const trimmed = val.trim();
+        if (!trimmed) return undefined;
+        const br = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+        const iso = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (iso) return iso[1];
+        return trimmed;
+      };
+
+      const de = normalizeDateParam(req.query.de);
+      const ate = normalizeDateParam(req.query.ate);
+      const busca = typeof req.query.busca === 'string' ? req.query.busca.trim() : '';
+
+      let filterWhere = 't.company_id = ?';
+      const filterParams: any[] = [companyId];
+
+      if (de) {
+        filterWhere += ' AND substr(t.data, 1, 10) >= ?';
+        filterParams.push(de);
+      }
+      if (ate) {
+        filterWhere += ' AND substr(t.data, 1, 10) <= ?';
+        filterParams.push(ate);
+      }
+      if (busca) {
+        const trnCols = new Set<string>();
+        try {
+          const info = db.prepare('PRAGMA table_info(bank_transactions)').all() as any[];
+          for (const col of info) {
+            if (col && typeof col.name === 'string') trnCols.add(col.name);
+          }
+        } catch {
+          // Ignore if PRAGMA is unavailable in test stubs
+        }
+        const likeParam = `%${busca.toLowerCase()}%`;
+        const searchFields = [
+          "LOWER(COALESCE(t.descricao_original, '')) LIKE ?",
+          "LOWER(COALESCE(c.nome, '')) LIKE ?",
+          "LOWER(COALESCE(i.numero, '')) LIKE ?",
+          "LOWER(COALESCE(i.emitente_nome, '')) LIKE ?",
+          "LOWER(COALESCE(i.destinatario_nome, '')) LIKE ?",
+          "CAST(t.valor AS TEXT) LIKE ?"
+        ];
+        for (const extraCol of ['descricao_custom', 'documento', 'fornecedor_cliente_nome', 'observacoes_cliente']) {
+          if (trnCols.has(extraCol)) {
+            searchFields.push(`LOWER(COALESCE(t.${extraCol}, '')) LIKE ?`);
+          }
+        }
+        filterWhere += ` AND (${searchFields.join(' OR ')})`;
+        for (let i = 0; i < searchFields.length; i++) {
+          filterParams.push(likeParam);
+        }
+      }
+
+      const isPaginated = req.query.limit !== undefined || req.query.offset !== undefined;
+      const parsedLimit = req.query.limit !== undefined ? parseInt(String(req.query.limit), 10) : 100;
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(500, parsedLimit) : 100;
+      const parsedOffset = req.query.offset !== undefined ? parseInt(String(req.query.offset), 10) : 0;
+      const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
+      let statusCondition = '';
+      if (status === 'pending' || status === 'pendente' || status === 'pendentes') {
+        statusCondition = ' AND (t.conciliado = 0 OR t.conciliado IS NULL)';
+      } else if (status === 'reconciled' || status === 'conciliado' || status === 'conciliados') {
+        statusCondition = ' AND t.conciliado = 1';
+      }
 
       let sql = `
         SELECT 
@@ -269,24 +338,49 @@ export const bpoController = {
         FROM bank_transactions t
         LEFT JOIN financial_categories c ON t.categoria_id = c.id
         LEFT JOIN invoices i ON t.invoice_id = i.id
-        WHERE t.company_id = ?
+        WHERE ${filterWhere}${statusCondition}
+        ORDER BY t.data DESC, t.created_at DESC
       `;
 
-      const params: any[] = [companyId];
-
-      if (status === 'pending') {
-        sql += ' AND (t.conciliado = 0 OR t.conciliado IS NULL)';
-      } else if (status === 'reconciled') {
-        sql += ' AND t.conciliado = 1';
+      const queryParams = [...filterParams];
+      if (isPaginated) {
+        sql += ' LIMIT ? OFFSET ?';
+        queryParams.push(limit, offset);
       }
 
-      sql += ' ORDER BY t.data DESC, t.created_at DESC';
+      const transactions = db.prepare(sql).all(...queryParams) as any[];
+      const summary = reconciliationSummary(db, companyId);
 
-      const transactions = db.prepare(sql).all(...params) as any[];
+      if (isPaginated) {
+        const countSql = `
+          SELECT 
+            COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN t.conciliado = 1 THEN 1 ELSE 0 END), 0) AS conciliados,
+            COALESCE(SUM(CASE WHEN t.conciliado = 0 OR t.conciliado IS NULL THEN 1 ELSE 0 END), 0) AS pendentes
+          FROM bank_transactions t
+          LEFT JOIN financial_categories c ON t.categoria_id = c.id
+          LEFT JOIN invoices i ON t.invoice_id = i.id
+          WHERE ${filterWhere}
+        `;
+        const counts = db.prepare(countSql).get(...filterParams) as any;
+
+        res.json({
+          success: true,
+          items: transactions,
+          total: Number(counts?.total ?? 0),
+          conciliados: Number(counts?.conciliados ?? 0),
+          pendentes: Number(counts?.pendentes ?? 0),
+          limit,
+          offset,
+          summary,
+          data: transactions
+        });
+        return;
+      }
 
       res.json({
         success: true,
-        summary: reconciliationSummary(db, companyId),
+        summary,
         data: transactions
       });
     } catch (err: any) {

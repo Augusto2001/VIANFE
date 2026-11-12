@@ -25,6 +25,20 @@ async function call(method,{query={},body={},params={},identity=user}={}){let re
   }
   assert.equal((await call('getTransactions',{query:{company_id:'b'}})).code,403);
   const empty=await call('getTransactions',{query:{company_id:'b'},identity:{...user,tenant_id:'two'}});assert.equal(empty.result.summary.reconciledPercent,0);
+  const pageDefault=await call('getTransactions',{query:{company_id:'a',limit:''}});
+  assert.equal(pageDefault.result.items.length,100);assert.equal(pageDefault.result.total,978);
+  assert.equal(pageDefault.result.conciliados,29);assert.equal(pageDefault.result.pendentes,949);
+  assert.equal(pageDefault.result.limit,100);assert.equal(pageDefault.result.offset,0);
+  const pageMax=await call('getTransactions',{query:{company_id:'a',limit:'900',offset:'10'}});
+  assert.equal(pageMax.result.items.length,500);assert.equal(pageMax.result.limit,500);assert.equal(pageMax.result.offset,10);
+  const pageConc=await call('getTransactions',{query:{company_id:'a',status:'conciliado',limit:'50'}});
+  assert.equal(pageConc.result.items.length,29);assert.equal(pageConc.result.conciliados,29);assert.equal(pageConc.result.pendentes,949);
+  const pagePendTail=await call('getTransactions',{query:{company_id:'a',status:'pendente',limit:'100',offset:'900'}});
+  assert.equal(pagePendTail.result.items.length,49);assert.equal(pagePendTail.result.offset,900);
+  const pageFiltered=await call('getTransactions',{query:{company_id:'a',de:'2026-09-01',ate:'2026-09-30',busca:'fixture',limit:'25'}});
+  assert.equal(pageFiltered.result.items.length,25);assert.equal(pageFiltered.result.total,978);
+  const pageNoMatch=await call('getTransactions',{query:{company_id:'a',de:'2026-10-01',ate:'2026-10-31',busca:'inexistente',limit:'25'}});
+  assert.equal(pageNoMatch.result.items.length,0);assert.equal(pageNoMatch.result.total,0);assert.equal(pageNoMatch.result.conciliados,0);assert.equal(pageNoMatch.result.pendentes,0);
   const body={company_id:'a',nome:'Empréstimo recebido',tipo:'emprestimo'};
   const created=await call('createCategory',{body});assert.equal(created.code,201);assert.equal(created.result.data.tenant_id,'one');assert.equal(created.result.data.conta_debito_dominio,null);
   assert.equal((await call('createCategory',{body})).result.data.id,created.result.data.id);
