@@ -5,8 +5,10 @@ import {
   Building2, UploadCloud, Zap, Globe, Wand2, ArrowRight, CheckCircle2, AlertCircle, ArrowUpRight, ArrowDownLeft, 
   Sparkles, FileText, Check, Edit3, Download, RefreshCw, Plus, Filter, Link, Search,
   BookOpen, FileSpreadsheet, Layers, Paperclip, FileCheck, ArrowRightLeft, DollarSign, Calendar, Upload, FileUp, Copy,
-  RotateCcw, ExternalLink, Archive, ChevronDown
+  RotateCcw, ExternalLink, Archive, ChevronDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
+
+const PAGE_SIZE = 100;
 
 const formatCurrency = (val: number) => {
   return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -38,7 +40,14 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   });
 
   const [filterStatus, setFilterStatus] = useState<'pending' | 'reconciled' | 'all'>('pending');
+  const [filterDe, setFilterDe] = useState('');
+  const [filterAte, setFilterAte] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [conciliadosCount, setConciliadosCount] = useState(0);
+  const [pendentesCount, setPendentesCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
   const [companyInvoices, setCompanyInvoices] = useState<any[]>([]);
@@ -209,14 +218,34 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   // Active company ID ref to prevent cross-company data leakage
   const activeCompanyIdRef = React.useRef(company.id);
 
-  const loadData = async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(prev => {
+        const next = searchTerm.trim();
+        if (prev !== next) setPage(1);
+        return next;
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const loadData = async (overridePage?: number) => {
     const currentCompanyId = company.id;
     const requestId = ++requestSequence.current;
+    const currentPage = typeof overridePage === 'number' ? overridePage : page;
+    const offset = Math.max(0, (currentPage - 1) * PAGE_SIZE);
     setLoadError('');
     try {
       setLoading(true);
       const [resTrn, resCat, resChart, resProv, resInv] = await Promise.all([
-        api.getBpoTransactions(company.id, filterStatus === 'all' ? undefined : filterStatus),
+        api.getBpoTransactions(company.id, {
+          status: filterStatus === 'all' ? undefined : filterStatus,
+          limit: PAGE_SIZE,
+          offset,
+          de: filterDe || undefined,
+          ate: filterAte || undefined,
+          busca: debouncedSearch || undefined
+        }),
         api.getBpoCategories(company.id),
         api.getChartOfAccounts(company.id).catch(() => []),
         api.getProvisions(company.id).catch(() => []),
@@ -227,8 +256,25 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         return; // Discard stale response from prior company
       }
 
-      setTransactions(resTrn.data || []);
-      setSummary(resTrn.summary || {});
+      const items = Array.isArray(resTrn.items) ? resTrn.items : (resTrn.data || []);
+      const total = Number(resTrn.total ?? resTrn.summary?.totalCount ?? items.length);
+      const conciliados = Number(resTrn.conciliados ?? resTrn.summary?.reconciledCount ?? 0);
+      const pendentes = Number(resTrn.pendentes ?? resTrn.summary?.pendingCount ?? 0);
+      const reconciledPercent = total > 0
+        ? Math.round((conciliados / total) * 100)
+        : Number(resTrn.summary?.reconciledPercent ?? 0);
+
+      setTransactions(items);
+      setTotalItems(total);
+      setConciliadosCount(conciliados);
+      setPendentesCount(pendentes);
+      setSummary({
+        ...(resTrn.summary || {}),
+        totalCount: total,
+        reconciledCount: conciliados,
+        pendingCount: pendentes,
+        reconciledPercent
+      });
       setCategories(resCat || []);
       const invalidAccount = (c: any) => !/^\d+$/.test(c.codigo_conta || '') ||
         /[\ufffd\u0000-\u001f\u007f]|%PDF-|\/FontBBox|endstream/i.test(c.nome_conta || '') ||
@@ -237,6 +283,12 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
       setChartList((resChart || []).map((c: any) => invalidAccount(c) ? { ...c, invalid: true, nome_conta: '[Nome ilegível — reimporte o plano de contas]' } : c));
       setProvisionsList(resProv || []);
       setCompanyInvoices(resInv.invoices || []);
+
+      const activeCount = filterStatus === 'pending' ? pendentes : filterStatus === 'reconciled' ? conciliados : total;
+      const maxPage = Math.max(1, Math.ceil(activeCount / PAGE_SIZE));
+      if (currentPage > maxPage) {
+        setPage(maxPage);
+      }
     } catch (err: any) {
       if (requestId === requestSequence.current) setLoadError(err.message || 'Falha ao carregar conciliação');
     } finally {
@@ -247,25 +299,35 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
   };
 
   useEffect(() => {
+    const isCompanyChange = activeCompanyIdRef.current !== company.id;
     activeCompanyIdRef.current = company.id;
     setCategoryRowId(null);
-    // Immediate state reset on company change to eliminate cross-company contamination
-    setTransactions([]);
-    setSummary({
-      totalCount: 0,
-      reconciledCount: 0,
-      pendingCount: 0,
-      reconciledPercent: 0,
-      totalEntradas: 0,
-      totalSaidas: 0,
-      saldoLiquido: 0
-    });
-    setChartList([]);
-    setInvalidChartCount(0);
-    setProvisionsList([]);
-    setCompanyInvoices([]);
+    if (isCompanyChange) {
+      // Immediate state reset on company change to eliminate cross-company contamination
+      setTransactions([]);
+      setTotalItems(0);
+      setConciliadosCount(0);
+      setPendentesCount(0);
+      setSummary({
+        totalCount: 0,
+        reconciledCount: 0,
+        pendingCount: 0,
+        reconciledPercent: 0,
+        totalEntradas: 0,
+        totalSaidas: 0,
+        saldoLiquido: 0
+      });
+      setChartList([]);
+      setInvalidChartCount(0);
+      setProvisionsList([]);
+      setCompanyInvoices([]);
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
     loadData();
-  }, [company.id, filterStatus]);
+  }, [company.id, filterStatus, filterDe, filterAte, debouncedSearch, page]);
 
   const handleCreateCategory = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -561,16 +623,16 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
     }
   };
 
-  const filteredTransactions = transactions.filter(t => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      t.descricao_original?.toLowerCase().includes(term) ||
-      t.categoria_nome?.toLowerCase().includes(term) ||
-      t.invoice_numero?.toLowerCase().includes(term) ||
-      t.invoice_emitente?.toLowerCase().includes(term)
-    );
-  });
+  const filteredTransactions = transactions;
+  const activeTotal = filterStatus === 'pending'
+    ? pendentesCount
+    : filterStatus === 'reconciled'
+    ? conciliadosCount
+    : totalItems;
+  const totalPages = Math.max(1, Math.ceil(activeTotal / PAGE_SIZE));
+  const currentOffset = (page - 1) * PAGE_SIZE;
+  const startItem = activeTotal === 0 ? 0 : currentOffset + 1;
+  const endItem = Math.min(currentOffset + filteredTransactions.length, activeTotal);
 
   return (
     <div className="space-y-6">
@@ -691,7 +753,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
             </button>
 
             <button
-              onClick={loadData}
+              onClick={() => loadData()}
               disabled={loading}
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer"
               title="Atualizar transações"
@@ -781,33 +843,69 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
         )}
       </div>
 
-      {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setFilterStatus('pending')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-              filterStatus === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Pendentes ({loading || loadError ? '—' : (summary.pendingCount ?? 0)})
-          </button>
-          <button
-            onClick={() => setFilterStatus('reconciled')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-              filterStatus === 'reconciled' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Conciliados ({loading || loadError ? '—' : (summary.reconciledCount ?? 0)})
-          </button>
-          <button
-            onClick={() => setFilterStatus('all')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-              filterStatus === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Todos ({loading || loadError ? '—' : (summary.totalCount ?? 0)})
-          </button>
+      {/* Filter Tabs, Period & Search Bar */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => { setFilterStatus('pending'); setPage(1); }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                filterStatus === 'pending' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Pendentes ({loading || loadError ? '—' : pendentesCount})
+            </button>
+            <button
+              onClick={() => { setFilterStatus('reconciled'); setPage(1); }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                filterStatus === 'reconciled' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Conciliados ({loading || loadError ? '—' : conciliadosCount})
+            </button>
+            <button
+              onClick={() => { setFilterStatus('all'); setPage(1); }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                filterStatus === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Todos ({loading || loadError ? '—' : totalItems})
+            </button>
+          </div>
+
+          {/* Período (de / ate) */}
+          <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="text-slate-400 font-medium">De:</span>
+            <input
+              type="date"
+              value={filterDe}
+              onChange={(e) => { setFilterDe(e.target.value); setPage(1); }}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none"
+            />
+            <span className="text-slate-400 font-medium">Até:</span>
+            <input
+              type="date"
+              value={filterAte}
+              onChange={(e) => { setFilterAte(e.target.value); setPage(1); }}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none"
+            />
+            {(filterDe || filterAte || searchTerm) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterDe('');
+                  setFilterAte('');
+                  setSearchTerm('');
+                  setDebouncedSearch('');
+                  setPage(1);
+                }}
+                className="text-[11px] font-semibold text-rose-400 hover:text-rose-300 ml-1 cursor-pointer"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="relative flex-1 max-w-md">
@@ -815,7 +913,7 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
           <input
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
             placeholder="Buscar por descrição, fornecedor, valor ou nota..."
             className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:border-emerald-500"
           />
@@ -1216,6 +1314,51 @@ export const BankReconciliationView: React.FC<BankReconciliationViewProps> = ({ 
             );
           })
         )}
+
+        {/* Pagination Bar */}
+        <div className="px-4 py-3 bg-slate-900/80 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-3">
+            <span>
+              Total: <strong className="text-white">{loading || loadError ? '—' : totalItems}</strong>
+            </span>
+            <span>•</span>
+            <span>
+              Conciliados: <strong className="text-emerald-400">{loading || loadError ? '—' : conciliadosCount}</strong>
+            </span>
+            <span>•</span>
+            <span>
+              Pendentes: <strong className="text-amber-400">{loading || loadError ? '—' : pendentesCount}</strong>
+            </span>
+            {activeTotal > 0 && (
+              <span className="text-slate-500">
+                (Exibindo {startItem}–{endItem} de {activeTotal} • Página {page} de {totalPages})
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(prev => Math.max(prev - 1, 1))}
+              disabled={loading || page <= 1}
+              className="px-3 py-1.5 flex items-center gap-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 disabled:opacity-40 border border-slate-800 font-semibold cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Anterior</span>
+            </button>
+            <span className="px-2 font-mono text-slate-300">
+              {page} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={loading || page >= totalPages}
+              className="px-3 py-1.5 flex items-center gap-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 disabled:opacity-40 border border-slate-800 font-semibold cursor-pointer"
+            >
+              <span>Próxima</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ========================================================================= */}

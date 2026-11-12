@@ -442,8 +442,39 @@ export const api = {
     return json;
   },
 
-  async getBpoTransactions(companyId: string, status?: string): Promise<any> {
-    const url = status ? `${API_BASE}/bpo/transactions?company_id=${companyId}&status=${status}` : `${API_BASE}/bpo/transactions?company_id=${companyId}`;
+  async getBpoTransactions(
+    companyId: string,
+    statusOrParams?: string | {
+      status?: string;
+      limit?: number;
+      offset?: number;
+      de?: string;
+      ate?: string;
+      busca?: string;
+    },
+    extraParams?: {
+      limit?: number;
+      offset?: number;
+      de?: string;
+      ate?: string;
+      busca?: string;
+    }
+  ): Promise<any> {
+    const query = new URLSearchParams();
+    query.set('company_id', companyId);
+
+    const opts = typeof statusOrParams === 'object' && statusOrParams !== null
+      ? statusOrParams
+      : { status: statusOrParams, ...(extraParams || {}) };
+
+    if (opts.status && opts.status !== 'all') query.set('status', opts.status);
+    if (opts.limit !== undefined) query.set('limit', String(opts.limit));
+    if (opts.offset !== undefined) query.set('offset', String(opts.offset));
+    if (opts.de) query.set('de', opts.de);
+    if (opts.ate) query.set('ate', opts.ate);
+    if (opts.busca) query.set('busca', opts.busca);
+
+    const url = `${API_BASE}/bpo/transactions?${query.toString()}`;
     const res = await fetch(url, { headers: getAuthHeaders() });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Falha ao buscar transações');
