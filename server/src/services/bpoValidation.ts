@@ -5,11 +5,55 @@ export function isReadableFinancialText(value: unknown): value is string {
     !/%PDF-|data:application\/pdf|\/FontBBox|\/FontFile|endstream|startxref/i.test(value);
 }
 
+// Detecta codificação de arquivos do Domínio (UTF-8 válido ou fallback Windows-1252).
+export function decodeDominioChartText(input: unknown): string | null {
+  if (input === null || input === undefined) return null;
+  let bytes: Uint8Array | null = null;
+  if (Buffer.isBuffer(input) || input instanceof Uint8Array) {
+    bytes = input;
+  } else if (input instanceof ArrayBuffer) {
+    bytes = new Uint8Array(input);
+  } else if (typeof input === 'object' && (input as any).type === 'Buffer' && Array.isArray((input as any).data)) {
+    bytes = Buffer.from((input as any).data);
+  } else if (typeof input === 'string') {
+    const base64Match = input.match(/^data:[^;]*;base64,([A-Za-z0-9+/=\r\n]+)$/);
+    if (base64Match) {
+      bytes = Buffer.from(base64Match[1], 'base64');
+    } else {
+      let allLatin1 = true;
+      let hasHighByte = false;
+      for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i);
+        if (code > 0xff) { allLatin1 = false; break; }
+        if (code >= 0x80) hasHighByte = true;
+      }
+      if (allLatin1 && hasHighByte) {
+        bytes = Buffer.from(input, 'latin1');
+      } else {
+        return input.replace(/^\uFEFF/, '');
+      }
+    }
+  } else {
+    return null;
+  }
+
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    text = new TextDecoder('windows-1252').decode(bytes);
+  }
+  return text.replace(/^\uFEFF/, '');
+}
+
 // Domínio > Utilitários > Exportação > Contas: largura fixa, sem separador.
 // Código (7) + classificação sem pontos (20) + nome (40) + tipo S/A (1); última linha só com 9.
 const DOMINIO_FIXA = /^\d{8,}/;
-export function parseDominioFixedChart(lines: string[]): string[][] | null {
-  const linhas = lines.filter(l => l.trim() && !/^9+$/.test(l.trim()));
+export function parseDominioFixedChart(input: string[] | string | Buffer | Uint8Array): string[][] | null {
+  const rawLines = Array.isArray(input)
+    ? input.map(l => decodeDominioChartText(l) ?? '')
+    : (decodeDominioChartText(input) ?? '').split(/\r?\n/);
+  const linhas = rawLines.map(l => l.trimEnd()).filter(l => l.trim() && !/^9+$/.test(l.trim()));
   if (!linhas.length || !linhas.every(l => DOMINIO_FIXA.test(l) && l.length >= 28)) return null;
   const contas = linhas.map(l => ({
     codigo: String(parseInt(l.slice(0, 7), 10)),
@@ -17,7 +61,7 @@ export function parseDominioFixedChart(lines: string[]): string[][] | null {
     nome: l.slice(27, 67).trim(),
     tipo: l.slice(67, 68).toUpperCase() === 'S' ? 'sintetica' : 'analitica',
   }));
-  if (contas.some(c => !/^\d+$/.test(c.digitos) || !isReadableFinancialText(c.nome))) return null;
+  if (contas.some(c => !/^\d+$/.test(c.codigo) || c.codigo === '0' || !/^\d+$/.test(c.digitos) || !isReadableFinancialText(c.nome))) return null;
   // A máscara não vem no arquivo: cada tamanho distinto de classificação é um nível (ex.: 1,2,3,5,8 -> 1.1.1.01.001).
   const niveis = [...new Set(contas.map(c => c.digitos.length))].sort((a, b) => a - b);
   const pontuar = (d: string) => niveis.filter(n => n <= d.length)

@@ -7,7 +7,7 @@ import { predictiveAlertsService } from '../services/predictiveAlertsService.js'
 import { openFinanceService } from '../services/openFinanceService.js';
 
 import { AuthenticatedRequest } from '../middleware/authMiddleware.js';
-import { isReadableFinancialText, parseDominioFixedChart, reconciliationSummary } from '../services/bpoValidation.js';
+import { decodeDominioChartText, isReadableFinancialText, parseDominioFixedChart, reconciliationSummary } from '../services/bpoValidation.js';
 
 function canAccessCompany(req: Request, res: Response, companyId: unknown): boolean {
   const user = (req as AuthenticatedRequest).user;
@@ -494,10 +494,13 @@ export const bpoController = {
       const user = (req as AuthenticatedRequest).user!;
       const { company_id, nome, tipo, codigo_reduzido } = req.body;
       if (!canAccessCompany(req, res, company_id)) return;
+      const normalizedReduzido = typeof codigo_reduzido === 'string' && /^\d+$/.test(codigo_reduzido.trim())
+        ? String(parseInt(codigo_reduzido.trim(), 10))
+        : (typeof codigo_reduzido === 'string' ? codigo_reduzido.trim() : '');
       if (codigo_reduzido !== undefined) {
-        const account = typeof codigo_reduzido === 'string' && db.prepare(
+        const account = typeof codigo_reduzido === 'string' && normalizedReduzido && db.prepare(
           'SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?'
-        ).get(company_id, codigo_reduzido.trim()) as any;
+        ).get(company_id, normalizedReduzido) as any;
         if (!account || !/^\d+$/.test(account.codigo_conta) || account.tipo_conta !== 'analitica' ||
             !isReadableFinancialText(account.nome_conta) || /^(?:obj|endobj|stream|endstream|xref)$/i.test(account.nome_conta.trim())) {
           res.status(400).json({ error: 'Selecione um código reduzido de conta analítica válida do plano desta empresa.' }); return;
@@ -512,7 +515,7 @@ export const bpoController = {
       const existing = categories.find(c => c.tipo === tipo && c.nome.trim().toLocaleLowerCase('pt-BR') === normalized.toLocaleLowerCase('pt-BR'));
       const id = existing?.id || uuidv4();
       const previous = db.prepare('SELECT codigo_reduzido FROM financial_category_accounts WHERE category_id = ? AND company_id = ?').get(id, company_id) as any;
-      if (previous && codigo_reduzido !== undefined && previous.codigo_reduzido !== codigo_reduzido.trim()) {
+      if (previous && codigo_reduzido !== undefined && previous.codigo_reduzido !== normalizedReduzido) {
         res.status(409).json({ error: 'Esta categoria já possui outro código reduzido nesta empresa. Use um nome diferente ou revise o vínculo existente.' }); return;
       }
       db.exec('BEGIN IMMEDIATE');
@@ -520,7 +523,7 @@ export const bpoController = {
         if (!existing) db.prepare(`INSERT INTO financial_categories (id, tenant_id, codigo, nome, tipo, created_at)
           VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(id, user.tenant_id, `CUSTOM-${id}`, normalized, tipo);
         if (codigo_reduzido !== undefined) db.prepare(`INSERT INTO financial_category_accounts (category_id, company_id, codigo_reduzido)
-          VALUES (?, ?, ?) ON CONFLICT(category_id, company_id) DO NOTHING`).run(id, company_id, codigo_reduzido.trim());
+          VALUES (?, ?, ?) ON CONFLICT(category_id, company_id) DO NOTHING`).run(id, company_id, normalizedReduzido);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
       const data = db.prepare(`SELECT c.*, a.codigo_reduzido, p.nome_conta AS conta_nome FROM financial_categories c
@@ -913,18 +916,20 @@ export const bpoController = {
   async importChartOfAccounts(req: Request, res: Response): Promise<void> {
     try {
       const { company_id, raw_content, replace_existing } = req.body;
-      if (!company_id || !raw_content) {
+      const rawInput = raw_content ?? req.body?.raw_buffer ?? req.body?.buffer ?? req.body?.content_base64;
+      if (!company_id || !rawInput || (typeof rawInput === 'string' && !rawInput.trim())) {
         res.status(400).json({ error: 'company_id e raw_content são obrigatórios' });
         return;
       }
 
       if (!canAccessCompany(req, res, company_id)) return;
-      if (!isReadableFinancialText(raw_content)) {
+      const decodedContent = decodeDominioChartText(rawInput);
+      if (!decodedContent || !isReadableFinancialText(decodedContent)) {
         res.status(400).json({ error: 'Plano inválido: envie TXT/CSV legível exportado pelo Domínio. PDF ou conteúdo binário não é aceito aqui.' }); return;
       }
       const parsedAccounts: any[][] = [];
       // trimEnd: no layout de largura fixa do Domínio a posição de cada campo depende do início da linha
-      const lines = raw_content.split(/\r?\n/).map((l: string) => l.trimEnd()).filter((l: string) => l.trim().length > 0);
+      const lines = decodedContent.split(/\r?\n/).map((l: string) => l.trimEnd()).filter((l: string) => l.trim().length > 0);
       let imported = 0;
       const fixa = parseDominioFixedChart(lines);
       if (fixa) parsedAccounts.push(...fixa);
@@ -939,15 +944,15 @@ export const bpoController = {
         line = line.trim().replace(/^["]|["]$/g, '');
 
         // Ignora linhas de controle, traços e cabeçalhos
-        if (line.startsWith('---') || line.startsWith('===') || line.startsWith('___')) continue;
+        if (line.startsWith('---') || line.startsWith('===') || line.startsWith('___') || /^9+$/.test(line)) continue;
         const lower = line.toLowerCase();
         if (
           lower.includes('plano de contas') ||
-          (lower.includes('classifica') && lower.includes('descri')) ||
+          (lower.includes('classifica') && (lower.includes('descri') || lower.includes('nome') || lower.includes('cod') || lower.includes('cód'))) ||
           lower.startsWith('empresa:') ||
           lower.startsWith('pagina') ||
           lower.startsWith('página') ||
-          lower.includes('sistema') && lower.includes('contabil')
+          (lower.includes('sistema') && lower.includes('contabil'))
         ) {
           continue;
         }
@@ -965,9 +970,14 @@ export const bpoController = {
 
         // Se ainda for uma linha com espaços simples, tenta regex inteligente
         if (parts.length < 2) {
-          const match = line.match(/^([\d.]+)\s+(\d+)\s+(.+?)(?:\s+([ASas]))?(?:\s+([DCdc]))?$/);
-          if (match) {
-            parts = [match[1], match[2], match[3], match[4], match[5]].filter(Boolean);
+          const matchClassFirst = line.match(/^([\d.]+)\s+(\d+)\s+(.+?)(?:\s+([ASas]))?(?:\s+([DCdc]))?$/);
+          const matchCodeFirst = line.match(/^(?:1\s+)?(\d+)\s+(?:([ASas])\s+)?([\d.]+)\s+(.+?)(?:\s+([ASas]))?(?:\s+([DCdc]))?(?:\s+\d+)?$/);
+          if (matchClassFirst && matchClassFirst[1].includes('.')) {
+            parts = [matchClassFirst[1], matchClassFirst[2], matchClassFirst[3], matchClassFirst[4], matchClassFirst[5]].filter(Boolean);
+          } else if (matchCodeFirst) {
+            parts = [matchCodeFirst[1], matchCodeFirst[3], matchCodeFirst[4], matchCodeFirst[2] || matchCodeFirst[5], matchCodeFirst[6]].filter(Boolean);
+          } else if (matchClassFirst) {
+            parts = [matchClassFirst[1], matchClassFirst[2], matchClassFirst[3], matchClassFirst[4], matchClassFirst[5]].filter(Boolean);
           }
         }
 
@@ -978,43 +988,45 @@ export const bpoController = {
           let tipo = 'analitica';
           let natureza = '';
 
+          const isFlagToken = (p: string) => /^(?:[ASCD]|SINT[EÉ]TICA|ANAL[IÍ]TICA|CREDORA|DEVEDORA)$/i.test(p.trim());
+
           // Detecta qual parte é a classificação estruturada (tem pontos como 1.1.01...)
           const classIdx = parts.findIndex((p: string) => /^[\d.]+$/.test(p) && p.includes('.'));
           const numIdx = parts.findIndex((p: string, i: number) => /^\d+$/.test(p) && i !== classIdx);
 
           if (classIdx !== -1 && numIdx !== -1) {
             classificacao = parts[classIdx];
-            codigo = parts[numIdx];
-            const namePart = parts.find((p: string, i: number) => i !== classIdx && i !== numIdx && /[a-zA-Z]/.test(p) && p.length > 2);
+            codigo = String(parseInt(parts[numIdx], 10));
+            const namePart = parts.find((p: string, i: number) => i !== classIdx && i !== numIdx && !isFlagToken(p) && /[a-zA-ZÀ-ÿ]/.test(p) && p.length >= 2);
             nome = namePart || parts[Math.max(classIdx, numIdx) + 1] || 'Conta Contábil';
           } else if (parts.length >= 3) {
             if (/^\d+$/.test(parts[0]) && parts[1].includes('.')) {
-              codigo = parts[0];
+              codigo = String(parseInt(parts[0], 10));
               classificacao = parts[1];
               nome = parts[2];
               natureza = '';
             } else if (parts[0].includes('.') && /^\d+$/.test(parts[1])) {
               classificacao = parts[0];
-              codigo = parts[1];
+              codigo = String(parseInt(parts[1], 10));
               nome = parts[2];
               natureza = '';
             } else {
-              codigo = parts[0];
+              codigo = /^\d+$/.test(parts[0]) ? String(parseInt(parts[0], 10)) : parts[0];
               classificacao = parts[1];
               nome = parts[2];
               natureza = '';
             }
           }
 
-          if (/^\d+$/.test(codigo) && /^\d+(?:\.\d+)*$/.test(classificacao) && isReadableFinancialText(nome)) {
+          if (/^\d+$/.test(codigo) && codigo !== '0' && /^\d+(?:\.\d+)*$/.test(classificacao) && isReadableFinancialText(nome)) {
             // Natureza
-            const natPart = parts.find((p: string) => p.toUpperCase() === 'C' || p.toUpperCase() === 'CREDORA' || p.toUpperCase() === 'D' || p.toUpperCase() === 'DEVEDORA');
+            const natPart = parts.find((p: string) => /^(?:C|CREDORA|D|DEVEDORA)$/i.test(p));
             if (natPart) {
               natureza = natPart.toUpperCase().startsWith('C') ? 'C' : 'D';
             }
 
             // Tipo
-            const typePart = parts.find((p: string) => p.toUpperCase() === 'S' || p.toUpperCase() === 'SINTETICA' || p.toUpperCase() === 'A' || p.toUpperCase() === 'ANALITICA');
+            const typePart = parts.find((p: string) => /^(?:S|SINT[EÉ]TICA|A|ANAL[IÍ]TICA)$/i.test(p));
             if (typePart) {
               tipo = typePart.toUpperCase().startsWith('S') ? 'sintetica' : 'analitica';
             }
@@ -1031,8 +1043,13 @@ export const bpoController = {
       try {
         if (replace_existing) db.prepare('DELETE FROM dominio_chart_of_accounts WHERE company_id = ?').run(company_id);
         for (const [codigo, classificacao, nome, tipo, natureza] of parsedAccounts) {
-          if (!db.prepare('SELECT id FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?').get(company_id, codigo)) {
+          const existingAcc = db.prepare('SELECT id FROM dominio_chart_of_accounts WHERE company_id = ? AND codigo_conta = ?').get(company_id, codigo) as any;
+          if (!existingAcc) {
             insertStmt.run(uuidv4(), company_id, codigo, classificacao, nome, tipo, natureza); imported++;
+          } else {
+            db.prepare('UPDATE dominio_chart_of_accounts SET classificacao = ?, nome_conta = ?, tipo_conta = ?, natureza = ? WHERE id = ?')
+              .run(classificacao, nome, tipo, natureza, existingAcc.id);
+            imported++;
           }
         }
         db.exec('COMMIT');
@@ -1065,7 +1082,7 @@ export const bpoController = {
         return;
       }
 
-      const accounts = db.prepare('SELECT * FROM dominio_chart_of_accounts WHERE company_id = ? ORDER BY classificacao ASC').all(companyId);
+      const accounts = db.prepare('SELECT *, codigo_conta AS codigo_reduzido FROM dominio_chart_of_accounts WHERE company_id = ? ORDER BY classificacao ASC').all(companyId);
       res.json({ success: true, data: accounts });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

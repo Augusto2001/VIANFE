@@ -80,6 +80,17 @@ async function call(method,{query={},body={},params={},identity=user}={}){let re
   assert.equal((await call('importChartOfAccounts',{body:{company_id:'a',replace_existing:true,raw_content:'99;1.1.03;Falha isolada;D'}})).code,500);
   assert.equal(db.prepare('SELECT codigo_conta FROM dominio_chart_of_accounts').get().codigo_conta,'20');
   db.exec('DROP TRIGGER test_failure');
+  const win1252Sample=Buffer.from('0074;1.1.04.01;SERVIÇOS, LOCAÇÃO, CRÉDITO E ÓRGÃOS;A;D\r\n','latin1');
+  assert.throws(()=>new TextDecoder('utf-8',{fatal:true}).decode(win1252Sample));
+  const win1252Import=await call('importChartOfAccounts',{body:{company_id:'a',replace_existing:true,raw_content:win1252Sample}});
+  assert.equal(win1252Import.code,200);assert.equal(win1252Import.result.count,1);
+  const win1252Acc=db.prepare('SELECT * FROM dominio_chart_of_accounts WHERE company_id=? AND codigo_conta=?').get('a','74');
+  assert.ok(win1252Acc);assert.equal(win1252Acc.nome_conta,'SERVIÇOS, LOCAÇÃO, CRÉDITO E ÓRGÃOS');
+  const win1252Cat=await call('createCategory',{body:{company_id:'a',nome:'Operação Amsfer',tipo:'despesa',codigo_reduzido:'0074'}});
+  assert.equal(win1252Cat.code,201);assert.equal(win1252Cat.result.data.codigo_reduzido,'74');
+  assert.equal(win1252Cat.result.data.conta_nome,'SERVIÇOS, LOCAÇÃO, CRÉDITO E ÓRGÃOS');
+  const chartListRes=await call('getChartOfAccounts',{query:{company_id:'a'}});
+  assert.equal(chartListRes.result.data[0].codigo_reduzido,'74');
   if (process.argv[2]) {
     const csv=fs.readFileSync(process.argv[2],'utf8');
     const expected=csv.trim().split(/\r?\n/).slice(1).map(line=>line.split(';'));
