@@ -6,6 +6,7 @@ import { db, CERTS_DIR } from '../database/db.js';
 import { cleanNumeric, encryptText } from '../utils/crypto.js';
 import { validatePfxCertificate } from '../utils/pfxLoader.js';
 import { sefazDfeClient } from '../services/sefazDfeClient.js';
+import { getClientFolderInGDrive } from '../utils/driveFolderMatcher.js';
 
 
 // Lista Branca (Allowlist) de colunas públicas seguras:
@@ -177,18 +178,28 @@ export const companyController = {
         now
       );
 
-      // Create initial Google Drive config
+      // Create initial Google Drive config using existing client folder matched by CNPJ (never creating a duplicate root folder)
       const gdriveConfigId = uuidv4();
+      const matchedClientFolder = getClientFolderInGDrive(
+        String(razao_social).trim(),
+        cleanCnpj,
+        nome_fantasia ? String(nome_fantasia).trim() : undefined
+      );
+      const resolvedFolderName = gdrive_folder_name
+        ? String(gdrive_folder_name).trim()
+        : (matchedClientFolder ? path.basename(matchedClientFolder) : null);
+
       db.prepare(`
         INSERT INTO gdrive_configs (
-          id, company_id, folder_name, sync_frequency, is_active, last_sync_status, created_at, updated_at
+          id, company_id, folder_name, folder_path, sync_frequency, is_active, last_sync_status, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, 1, 'never', ?, ?
+          ?, ?, ?, ?, ?, 1, 'never', ?, ?
         )
       `).run(
         gdriveConfigId,
         id,
-        gdrive_folder_name ? String(gdrive_folder_name) : `Contabilidade/${String(razao_social).trim().replace(/[\/\\:*?"<>|]/g, '_')}`,
+        resolvedFolderName,
+        matchedClientFolder || null,
         sync_frequency ? String(sync_frequency) : 'daily',
         now,
         now

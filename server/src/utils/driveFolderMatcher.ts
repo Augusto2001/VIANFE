@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
+export const G_DRIVE_ROOT_PATH = 'G:\\Meu drive\\CLIENTES VIACONT';
 export const G_DRIVE_BASE_PATH = 'G:\\Meu drive\\CLIENTES VIACONT\\CLIENTES ATIVOS';
+export const G_DRIVE_INACTIVE_PATH = 'G:\\Meu drive\\CLIENTES VIACONT\\CLIENTES INATIVOS';
 
 export interface FolderAliasMapping {
   cnpj?: string;
@@ -78,139 +80,248 @@ export const KNOWN_FOLDER_ALIASES: FolderAliasMapping[] = [
   }
 ];
 
+export function normalizeFolderText(str: string): string {
+  return (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+}
+
+export function cleanCnpjDigits(cnpj?: string): string {
+  return (cnpj || '').replace(/\D/g, '');
+}
+
 /**
- * Enhanced folder matcher that finds client folder by CNPJ, known aliases, or fuzzy name matching.
+ * Checks whether a folder name matches a client CNPJ (with or without punctuation/mask,
+ * or via known legacy CNPJ folder alias).
  */
-export function getClientFolderInGDrive(companyName: string, cnpj?: string, nomeFantasia?: string): string | null {
-  if (!fs.existsSync(G_DRIVE_BASE_PATH)) {
-    return null;
+export function folderMatchesCnpj(folderName: string, cnpj?: string): boolean {
+  const cleanCnpj = cleanCnpjDigits(cnpj);
+  if (cleanCnpj.length !== 14) return false;
+
+  const folderDigits = (folderName || '').replace(/\D/g, '');
+  if (folderDigits.includes(cleanCnpj)) {
+    return true;
   }
 
+  const matchedAlias = KNOWN_FOLDER_ALIASES.find(a => a.cnpj === cleanCnpj);
+  if (matchedAlias) {
+    const normFolder = normalizeFolderText(folderName);
+    const normAlias = normalizeFolderText(matchedAlias.folderName);
+    if (normFolder === normAlias || normFolder.includes(normAlias)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Identifies active/inactive container directories (e.g. CLIENTES ATIVOS, CLIENTES INATIVOS, ATIVOS, INATIVOS).
+ */
+export function isActiveOrInactiveGroupFolder(folderName: string): boolean {
+  const norm = normalizeFolderText(folderName);
+  if (!norm) return false;
+  if (/\d{14}/.test((folderName || '').replace(/\D/g, ''))) return false;
+  return /\b(ATIVOS?|INATIVOS?|ATIVAS?|INATIVAS?|CLIENTES\s+VIACONT)\b/.test(norm);
+}
+
+function isDirectorySafe(dirPath: string): boolean {
   try {
-    const existingFolders = fs.readdirSync(G_DRIVE_BASE_PATH);
-    const cleanCnpj = (cnpj || '').replace(/\D/g, '');
-    const norm = (str: string) => (str || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-    const targetName = norm(companyName);
-    const targetFantasia = norm(nomeFantasia || '');
+    return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
-    // 0. Check Known Folder Aliases (e.g. JL Comércio -> LEANDRO GOMES NOGUEIRA)
-    const matchedAlias = KNOWN_FOLDER_ALIASES.find(a => {
-      if (cleanCnpj && a.cnpj && cleanCnpj === a.cnpj) return true;
-      if (a.aliases.some(alias => targetName.includes(norm(alias)) || (targetFantasia && targetFantasia.includes(norm(alias))))) return true;
-      return false;
-    });
+/**
+ * Collects candidate root and active/inactive subdirectories to search for client folders.
+ */
+export function getCandidateSearchDirs(basePath: string = process.env.VIANFE_DRIVE_BASE_PATH || G_DRIVE_BASE_PATH): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
 
-    if (matchedAlias) {
-      const aliasFolder = existingFolders.find(f => norm(f) === norm(matchedAlias.folderName) || norm(f).includes(norm(matchedAlias.folderName)));
-      if (aliasFolder) {
-        return path.join(G_DRIVE_BASE_PATH, aliasFolder);
-      }
-      const directPath = path.join(G_DRIVE_BASE_PATH, matchedAlias.folderName);
-      if (fs.existsSync(directPath)) {
-        return directPath;
-      }
-    }
+  const addDir = (dir: string) => {
+    if (!dir) return;
+    const key = path.resolve(dir);
+    if (seen.has(key)) return;
+    if (!isDirectorySafe(dir)) return;
+    seen.add(key);
+    result.push(dir);
+  };
 
-    // 1. Try matching by clean CNPJ in folder name
-    if (cleanCnpj && cleanCnpj.length === 14) {
-      const matchByCnpj = existingFolders.find(f => f.replace(/\D/g, '').includes(cleanCnpj));
-      if (matchByCnpj) {
-        return path.join(G_DRIVE_BASE_PATH, matchByCnpj);
-      }
-    }
-
-    // 2. Fuzzy name matching
-    const words = targetName.split(/\s+/).filter(w => w.length > 3 && !['LTDA', 'EIRELI', 'ME', 'EPP', 'COMERCIO', 'SERVICOS', 'CONVENIENCIA'].includes(w));
-
-    let bestMatch: string | null = null;
-    let maxMatchedWords = 0;
-
-    for (const folder of existingFolders) {
-      const normFolder = norm(folder);
-      let matchedCount = 0;
-      for (const w of words) {
-        if (normFolder.includes(w)) {
-          matchedCount++;
+  const scanSubGroups = (dir: string, depth: number = 0) => {
+    if (depth > 2 || !isDirectorySafe(dir)) return;
+    try {
+      const entries = fs.readdirSync(dir);
+      for (const entry of entries) {
+        if (isActiveOrInactiveGroupFolder(entry)) {
+          const full = path.join(dir, entry);
+          if (isDirectorySafe(full)) {
+            addDir(full);
+            scanSubGroups(full, depth + 1);
+          }
         }
       }
-      if (matchedCount > maxMatchedWords) {
-        maxMatchedWords = matchedCount;
-        bestMatch = folder;
+    } catch {
+      // Ignore unreadable directories
+    }
+  };
+
+  if (isDirectorySafe(basePath)) {
+    addDir(basePath);
+    scanSubGroups(basePath, 0);
+  }
+
+  const baseName = path.basename(basePath);
+  if (isActiveOrInactiveGroupFolder(baseName)) {
+    const parentDir = path.dirname(basePath);
+    if (parentDir && parentDir !== basePath && isDirectorySafe(parentDir)) {
+      addDir(parentDir);
+      scanSubGroups(parentDir, 0);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Finds an existing client folder by CNPJ (with or without mask in the folder name),
+ * searching the base path as well as active and inactive subdirectories.
+ * Never creates a new root client folder; logs a warning when not found.
+ */
+export function getClientFolderInGDrive(
+  companyName: string,
+  cnpj?: string,
+  nomeFantasia?: string,
+  basePath: string = process.env.VIANFE_DRIVE_BASE_PATH || G_DRIVE_BASE_PATH
+): string | null {
+  try {
+    const searchDirs = getCandidateSearchDirs(basePath);
+    if (searchDirs.length === 0) {
+      return null;
+    }
+
+    let cleanCnpj = cleanCnpjDigits(cnpj);
+    if (cleanCnpj.length !== 14) {
+      const fromName = cleanCnpjDigits(companyName);
+      if (fromName.length === 14) {
+        cleanCnpj = fromName;
+      } else {
+        const targetName = normalizeFolderText(companyName);
+        const targetFantasia = normalizeFolderText(nomeFantasia || '');
+        const aliasMatch = KNOWN_FOLDER_ALIASES.find(a =>
+          a.cnpj && a.aliases.some(alias => {
+            const normAlias = normalizeFolderText(alias);
+            return (targetName && targetName.includes(normAlias)) || (targetFantasia && targetFantasia.includes(normAlias));
+          })
+        );
+        if (aliasMatch?.cnpj) {
+          cleanCnpj = aliasMatch.cnpj;
+        }
       }
     }
 
-    if (bestMatch && maxMatchedWords >= 1) {
-      return path.join(G_DRIVE_BASE_PATH, bestMatch);
+    if (cleanCnpj.length !== 14) {
+      console.warn(`[DriveMatcher] CNPJ inválido ou não informado para localizar pasta do cliente (${companyName || 'Sem razão social'}). Nenhuma pasta raiz foi criada.`);
+      return null;
     }
 
-    // 3. Fallback to first word match
-    const firstWord = targetName.split(/\s+/)[0];
-    const matchByFirstWord = existingFolders.find(f => norm(f).includes(firstWord));
-    if (matchByFirstWord) {
-      return path.join(G_DRIVE_BASE_PATH, matchByFirstWord);
+    for (const dir of searchDirs) {
+      let existingEntries: string[] = [];
+      try {
+        existingEntries = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+
+      for (const entry of existingEntries) {
+        if (isActiveOrInactiveGroupFolder(entry)) continue;
+        const fullEntryPath = path.join(dir, entry);
+        if (!isDirectorySafe(fullEntryPath)) continue;
+
+        if (folderMatchesCnpj(entry, cleanCnpj)) {
+          return fullEntryPath;
+        }
+      }
     }
 
-    // 4. If no folder exists, create new clean folder
-    const newFolderName = companyName.replace(/[\/\\:*?"<>|]/g, '_').toUpperCase();
-    const newFolderPath = path.join(G_DRIVE_BASE_PATH, newFolderName);
-    fs.mkdirSync(newFolderPath, { recursive: true });
-    return newFolderPath;
+    console.warn(`[DriveMatcher] Pasta do cliente não encontrada no Drive para o CNPJ ${cleanCnpj} (${companyName || 'Sem razão social'}). Nenhuma pasta raiz foi criada.`);
+    return null;
   } catch (err: any) {
-    console.warn(`[DriveMatcher] Erro ao buscar pasta em G: ${err.message}`);
+    console.warn(`[DriveMatcher] Erro ao buscar pasta em Drive: ${err.message}`);
     return null;
   }
 }
 
 /**
- * Ensures SETOR FISCAL\NFe or SETOR FISCAL\NF folder exists inside the client folder.
- * Supports both "NF" and "NFe" subdirectories seamlessly.
+ * Ensures a single child subfolder exists inside parentDir without creating duplicates
+ * if a case/accent-insensitive match already exists.
  */
-export function getSetorFiscalNfeDir(clientFolderPath: string): string {
-  let setorFiscalDir = path.join(clientFolderPath, 'SETOR FISCAL');
-  if (!fs.existsSync(setorFiscalDir)) {
-    const subItems = fs.readdirSync(clientFolderPath);
-    const existingSetor = subItems.find(i => i.toUpperCase().includes('SETOR FISCAL') || i.toUpperCase().includes('FISCAL'));
-    if (existingSetor) {
-      setorFiscalDir = path.join(clientFolderPath, existingSetor);
-    } else {
-      try {
-        fs.mkdirSync(setorFiscalDir, { recursive: true });
-      } catch (e: any) {
-        return clientFolderPath;
-      }
+export function ensureSubfolderNoDuplicate(parentDir: string, desiredName: string): string {
+  const targetNorm = normalizeFolderText(desiredName);
+  try {
+    const items = fs.readdirSync(parentDir);
+    const existing = items.find(item => {
+      const full = path.join(parentDir, item);
+      return isDirectorySafe(full) && normalizeFolderText(item) === targetNorm;
+    });
+    if (existing) {
+      return path.join(parentDir, existing);
     }
+  } catch {
+    // Proceed to create if directory cannot be listed
   }
 
-  if (!fs.existsSync(setorFiscalDir)) {
-    return clientFolderPath;
+  const newDir = path.join(parentDir, desiredName);
+  if (!fs.existsSync(newDir)) {
+    fs.mkdirSync(newDir, { recursive: true });
   }
-
-  const setorItems = fs.readdirSync(setorFiscalDir);
-  const nfeFolder = setorItems.find(i => i.trim().toUpperCase() === 'NFE');
-  const nfFolder = setorItems.find(i => i.trim().toUpperCase() === 'NF');
-
-  if (nfeFolder) {
-    return path.join(setorFiscalDir, nfeFolder);
-  }
-
-  if (nfFolder) {
-    return path.join(setorFiscalDir, nfFolder);
-  }
-
-  const finalNfeDir = path.join(setorFiscalDir, 'NFe');
-  if (!fs.existsSync(finalNfeDir)) {
-    try {
-      fs.mkdirSync(finalNfeDir, { recursive: true });
-    } catch (e: any) {
-      return setorFiscalDir;
-    }
-  }
-
-  return finalNfeDir;
+  return newDir;
 }
 
 /**
- * Returns storage paths targeting G:\Meu drive\CLIENTES VIACONT\CLIENTES ATIVOS\[CLIENTE]\SETOR FISCAL\[NFe|NF]\[ANO]\[MÊS]\[Entradas|Saidas]\
+ * Ensures <pasta do cliente>/SETOR FISCAL/NFe exists, creating only missing subfolders.
+ */
+export function getSetorFiscalNfeDir(clientFolderPath: string): string {
+  try {
+    const setorFiscalDir = ensureSubfolderNoDuplicate(clientFolderPath, 'SETOR FISCAL');
+    return ensureSubfolderNoDuplicate(setorFiscalDir, 'NFe');
+  } catch {
+    return clientFolderPath;
+  }
+}
+
+/**
+ * Ensures <pasta do cliente>/SETOR FISCAL/NFe/AAAA/MM/Saidas exists,
+ * reusing existing subfolders and creating only the ones that are missing.
+ */
+export function ensureClientNfeSaidasDir(clientFolderPath: string, year: string, month: string): string {
+  const setorFiscalNfe = getSetorFiscalNfeDir(clientFolderPath);
+  const yearDir = ensureSubfolderNoDuplicate(setorFiscalNfe, String(year));
+  const monthDir = ensureSubfolderNoDuplicate(yearDir, String(month).padStart(2, '0'));
+  return ensureSubfolderNoDuplicate(monthDir, 'Saidas');
+}
+
+function extractYearAndMonth(dataEmissaoStr?: string): { year: string; month: string } {
+  const isoMatch = String(dataEmissaoStr || '').trim().match(/^(\d{4})-(\d{2})/);
+  if (isoMatch) {
+    return { year: isoMatch[1], month: isoMatch[2] };
+  }
+  const emissionDate = new Date(dataEmissaoStr || Date.now());
+  if (!isNaN(emissionDate.getTime())) {
+    return {
+      year: String(emissionDate.getFullYear()),
+      month: String(emissionDate.getMonth() + 1).padStart(2, '0')
+    };
+  }
+  const now = new Date();
+  return {
+    year: String(now.getFullYear()),
+    month: String(now.getMonth() + 1).padStart(2, '0')
+  };
+}
+
+/**
+ * Returns storage paths targeting <pasta do cliente>/SETOR FISCAL/NFe/AAAA/MM/Saidas
+ * when the existing client folder is found by CNPJ (never creating a duplicate client root folder).
  */
 export function getInvoiceStoragePaths(
   companyName: string,
@@ -218,45 +329,29 @@ export function getInvoiceStoragePaths(
   chaveAcesso: string,
   fallbackStorageDir: string,
   cnpj?: string,
-  tipo: 'entrada' | 'saida' = 'entrada',
-  nomeFantasia?: string
+  tipo: 'entrada' | 'saida' = 'saida',
+  nomeFantasia?: string,
+  basePath: string = process.env.VIANFE_DRIVE_BASE_PATH || G_DRIVE_BASE_PATH
 ): { xmlFilePath: string; pdfFilePath: string } {
-  const emissionDate = new Date(dataEmissaoStr || Date.now());
-  const year = String(emissionDate.getFullYear());
-  const month = String(emissionDate.getMonth() + 1).padStart(2, '0');
-  const subFolder = tipo === 'saida' ? 'Saidas' : 'Entradas';
+  const { year, month } = extractYearAndMonth(dataEmissaoStr);
 
-  const gDriveClientFolder = getClientFolderInGDrive(companyName, cnpj, nomeFantasia);
+  const gDriveClientFolder = getClientFolderInGDrive(companyName, cnpj, nomeFantasia, basePath);
 
   if (gDriveClientFolder && fs.existsSync(gDriveClientFolder)) {
-    const setorFiscalNfe = getSetorFiscalNfeDir(gDriveClientFolder);
-    
-    // Check if direct XMLs folder exists or create subfolder Entradas/Saidas
-    const directXmls = path.join(setorFiscalNfe, year, month, 'XMLs');
-    let xmlDir = path.join(setorFiscalNfe, year, month, subFolder, 'XMLs');
-    let pdfDir = path.join(setorFiscalNfe, year, month, subFolder, 'PDFs');
-
-    // If direct XMLs exists (legacy flat month structure), write to flat month or subfolder
-    if (fs.existsSync(directXmls) && !fs.existsSync(path.join(setorFiscalNfe, year, month, subFolder))) {
-      xmlDir = directXmls;
-      pdfDir = path.join(setorFiscalNfe, year, month, 'PDFs');
-    }
-
     try {
-      fs.mkdirSync(xmlDir, { recursive: true });
-      fs.mkdirSync(pdfDir, { recursive: true });
-
+      const saidasDir = ensureClientNfeSaidasDir(gDriveClientFolder, year, month);
       return {
-        xmlFilePath: path.join(xmlDir, `${chaveAcesso}.xml`),
-        pdfFilePath: path.join(pdfDir, `DANFE_${chaveAcesso}.pdf`),
+        xmlFilePath: path.join(saidasDir, `${chaveAcesso}.xml`),
+        pdfFilePath: path.join(saidasDir, `DANFE_${chaveAcesso}.pdf`),
       };
     } catch (err: any) {
-      console.warn(`[DriveMatcher] Aviso ao gravar pastas em G: ${err.message}. Usando armazenamento padrão.`);
+      console.warn(`[DriveMatcher] Aviso ao gravar subpastas em Drive: ${err.message}. Usando armazenamento local.`);
     }
   }
 
-  // Fallback to local storage/xmls/EMPRESA/ANO/MES/SUBFOLDER
-  const cleanCompanyName = companyName.replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, '_').substring(0, 40).toUpperCase();
+  // Fallback to local storage (never inside Drive root)
+  const subFolder = tipo === 'entrada' ? 'Entradas' : 'Saidas';
+  const cleanCompanyName = (companyName || 'EMPRESA').replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, '_').substring(0, 40).toUpperCase();
   const xmlDir = path.join(fallbackStorageDir, 'xmls', cleanCompanyName, year, month, subFolder);
   const pdfDir = path.join(fallbackStorageDir, 'pdfs', cleanCompanyName, year, month, subFolder);
 

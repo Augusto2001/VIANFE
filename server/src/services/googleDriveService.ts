@@ -9,6 +9,24 @@ export interface DriveFolder {
   mimeType: string;
 }
 
+const KNOWN_CNPJ_FOLDER_ALIASES: Array<{ cnpj: string; folderName: string }> = [
+  { cnpj: '73472235000150', folderName: 'LEANDRO GOMES NOGUEIRA (C)-26 (SN) ( 42 )' },
+  { cnpj: '13549736000165', folderName: 'FARMACIA PREÇO BOM (FRANK DANILO) (SN) ( 26 )' },
+  { cnpj: '42597616000131', folderName: 'RWM FARMÁCIA PREÇO CERTO (SN) ( 68 )' },
+  { cnpj: '54536662000100', folderName: 'FARMACIA DIAS QUEIROZ (SN) ( 25 )' },
+  { cnpj: '50650733000140', folderName: 'PETCHIC (SN) ( 59 )' },
+  { cnpj: '51090446000195', folderName: 'CHURRASCARIA TRADIÇÃO LTDA (SN) ( 13 )' },
+  { cnpj: '11415194000102', folderName: 'BOM TODO COMERCIO VAREJISTA EIRELI ME ( 4 ) (SN) ( 11 )' },
+];
+
+function normText(str: string): string {
+  return (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+}
+
+function cleanCnpj(cnpj?: string): string {
+  return (cnpj || '').replace(/\D/g, '');
+}
+
 export class GoogleDriveService {
   private driveClient: any = null;
   private isConfigured: boolean = false;
@@ -73,7 +91,7 @@ export class GoogleDriveService {
   }
 
   /**
-   * Save Google credentials JSON (Service Account)
+   * Save Google credentials JSON (Service Account or OAuth2)
    */
   public saveCredentials(jsonContent: string) {
     try {
@@ -123,50 +141,161 @@ export class GoogleDriveService {
     }
   }
 
+  public folderMatchesCnpj(folderName: string, cnpj?: string): boolean {
+    const targetCnpj = cleanCnpj(cnpj);
+    if (targetCnpj.length !== 14) return false;
+
+    const digits = (folderName || '').replace(/\D/g, '');
+    if (digits.includes(targetCnpj)) {
+      return true;
+    }
+
+    const alias = KNOWN_CNPJ_FOLDER_ALIASES.find(a => a.cnpj === targetCnpj);
+    if (alias) {
+      const nFolder = normText(folderName);
+      const nAlias = normText(alias.folderName);
+      if (nFolder === nAlias || nFolder.includes(nAlias)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isStatusGroupFolder(folderName: string): boolean {
+    const norm = normText(folderName);
+    if (!norm) return false;
+    if (/\d{14}/.test((folderName || '').replace(/\D/g, ''))) return false;
+    return /\b(ATIVOS?|INATIVOS?|ATIVAS?|INATIVAS?|CLIENTES)\b/.test(norm);
+  }
+
   /**
-   * Create or find a subfolder hierarchy: [Base Folder] / [Empresa] / [YYYY] / [MM] / [XMLs | PDFs]
+   * Locate existing client folder by CNPJ (with or without mask in name),
+   * searching rootFolderId and active/inactive subfolders.
+   * Never creates a new client folder; logs a warning when not found.
+   */
+  public async findClientFolderByCnpj(
+    cnpj: string,
+    rootFolderId: string = 'root',
+    companyName: string = ''
+  ): Promise<DriveFolder | null> {
+    if (!this.isConfigured || !this.driveClient) {
+      throw new Error('Google Drive não configurado; nenhuma pasta foi consultada.');
+    }
+
+    const targetCnpj = cleanCnpj(cnpj);
+    if (targetCnpj.length !== 14) {
+      console.warn(`[GoogleDrive] CNPJ inválido ou não informado para localizar pasta (${companyName || cnpj}). Nenhuma pasta raiz foi criada.`);
+      return null;
+    }
+
+    const visitedParents = new Set<string>();
+    const searchParent = async (parentId: string, depth: number): Promise<DriveFolder | null> => {
+      if (depth > 2 || visitedParents.has(parentId)) return null;
+      visitedParents.add(parentId);
+
+      const folders = await this.listFolders(parentId);
+      const directMatch = folders.find(f => this.folderMatchesCnpj(f.name, targetCnpj));
+      if (directMatch) {
+        return directMatch;
+      }
+
+      for (const f of folders) {
+        if (this.isStatusGroupFolder(f.name)) {
+          const nestedMatch = await searchParent(f.id, depth + 1);
+          if (nestedMatch) {
+            return nestedMatch;
+          }
+        }
+      }
+
+      return null;
+    };
+
+    const found = await searchParent(rootFolderId, 0);
+    if (!found) {
+      console.warn(`[GoogleDrive] Pasta do cliente não encontrada para o CNPJ ${targetCnpj} (${companyName || 'Sem razão social'}). Nenhuma pasta raiz foi criada.`);
+    }
+    return found;
+  }
+
+  /**
+   * Locate existing client folder by CNPJ and ensure:
+   * <pasta do cliente>/SETOR FISCAL/NFe/AAAA/MM/Saidas
+   * creating only missing subfolders and never duplicating existing ones or creating a new client root folder.
    */
   public async ensureCompanyFolderStructure(
     baseFolderId: string,
     companyName: string,
     year: string,
     month: string,
-    subType: 'XMLs' | 'PDFs'
+    subType: string = 'Saidas',
+    cnpj?: string
   ): Promise<string> {
     if (!baseFolderId || /^(virtual_|folder_)/.test(baseFolderId)) throw new Error('Pasta real do Drive não configurada.');
-    const cleanCompanyName = companyName.replace(/[\/\\:*?"<>|]/g, '_').trim();
 
     if (!this.isConfigured || !this.driveClient) {
       throw new Error('Google Drive não configurado; backup pendente.');
     }
 
     try {
-      let companyFolderId = baseFolderId;
-      if (baseFolderId === 'root' || baseFolderId === '1Juqlv6RVxXa0uojqUGXX5GyPnFNPfwkC') {
-        companyFolderId = await this.getOrCreateFolder(cleanCompanyName, baseFolderId);
+      let resolvedCnpj = cleanCnpj(cnpj);
+      if (resolvedCnpj.length !== 14) {
+        const cnpjInName = cleanCnpj(companyName);
+        if (cnpjInName.length === 14) {
+          resolvedCnpj = cnpjInName;
+        } else {
+          try {
+            const row = db.prepare('SELECT cnpj FROM companies WHERE razao_social = ?').get(companyName) as any;
+            if (row?.cnpj) {
+              resolvedCnpj = cleanCnpj(row.cnpj);
+            }
+          } catch {
+            // Ignore DB lookup failure in isolated mocks
+          }
+        }
       }
-      const yearFolderId = await this.getOrCreateFolder(year, companyFolderId);
-      const monthFolderId = await this.getOrCreateFolder(month, yearFolderId);
-      const typeFolderId = await this.getOrCreateFolder(subType, monthFolderId);
-      return typeFolderId;
+
+      let companyFolderId = '';
+      if (resolvedCnpj.length === 14) {
+        const matched = await this.findClientFolderByCnpj(resolvedCnpj, baseFolderId, companyName);
+        if (!matched) {
+          throw new Error(`Pasta do cliente não encontrada no Google Drive para o CNPJ ${resolvedCnpj} (${companyName}); nenhuma pasta raiz foi criada.`);
+        }
+        companyFolderId = matched.id;
+      } else {
+        console.warn(`[GoogleDrive] CNPJ não informado para localizar pasta existente de "${companyName}". Nenhuma pasta raiz foi criada.`);
+        throw new Error(`CNPJ obrigatório para localizar pasta existente do cliente (${companyName}) no Google Drive.`);
+      }
+
+      const setorFiscalId = await this.getOrCreateFolder('SETOR FISCAL', companyFolderId);
+      const nfeFolderId = await this.getOrCreateFolder('NFe', setorFiscalId);
+      const yearFolderId = await this.getOrCreateFolder(String(year), nfeFolderId);
+      const monthFolderId = await this.getOrCreateFolder(String(month).padStart(2, '0'), yearFolderId);
+      const targetSubFolder = subType && normText(subType) === 'ENTRADAS' ? 'Saidas' : 'Saidas';
+      const saidasFolderId = await this.getOrCreateFolder(targetSubFolder, monthFolderId);
+      return saidasFolderId;
     } catch (err: any) {
-      console.error('Error creating folder structure on Google Drive:', err);
+      console.error('Error ensuring folder structure on Google Drive:', err.message || err);
       throw err;
     }
   }
 
   private async getOrCreateFolder(name: string, parentId: string): Promise<string> {
     const res = await this.driveClient.files.list({
-      q: `'${parentId}' in parents and name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-      fields: 'files(id, name)',
+      q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: 'files(id, name, mimeType)',
       spaces: 'drive',
     });
 
-    if (res.data.files && res.data.files.length > 0) {
-      return res.data.files[0].id;
+    const targetNorm = normText(name);
+    const files: Array<{ id: string; name?: string }> = res?.data?.files || [];
+    const existing = files.find(f => f && f.id && normText(f.name || '') === targetNorm);
+    if (existing) {
+      return existing.id;
     }
 
-    // Create new folder
+    // Create only the missing subfolder
     const created = await this.driveClient.files.create({
       requestBody: {
         name,

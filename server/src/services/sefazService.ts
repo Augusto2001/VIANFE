@@ -279,7 +279,7 @@ export class SefazService {
    */
   public async syncInvoiceToDrive(invoiceId: string): Promise<boolean> {
     const invoice = db.prepare(`
-      SELECT i.*, c.razao_social as company_name, g.folder_id as drive_folder_id, g.is_active as gdrive_active
+      SELECT i.*, c.razao_social as company_name, c.cnpj as company_cnpj, g.folder_id as drive_folder_id, g.is_active as gdrive_active
       FROM invoices i
       JOIN companies c ON i.company_id = c.id
       LEFT JOIN gdrive_configs g ON c.id = g.company_id
@@ -291,27 +291,30 @@ export class SefazService {
     }
 
     const baseFolderId = invoice.drive_folder_id || 'root';
+    const isoMatch = String(invoice.data_emissao || '').trim().match(/^(\d{4})-(\d{2})/);
     const emissionDate = new Date(invoice.data_emissao || Date.now());
-    const year = String(emissionDate.getFullYear());
-    const month = String(emissionDate.getMonth() + 1).padStart(2, '0');
+    const year = isoMatch ? isoMatch[1] : String(emissionDate.getFullYear());
+    const month = isoMatch ? isoMatch[2] : String(emissionDate.getMonth() + 1).padStart(2, '0');
 
     try {
       let uploadedFileId: string | null = null;
+      let saidasFolderId: string | null = null;
 
-      // 1. Upload XML
+      // 1. Upload XML into <pasta do cliente>/SETOR FISCAL/NFe/AAAA/MM/Saidas
       if (invoice.xml_file_path && fs.existsSync(invoice.xml_file_path)) {
-        const xmlFolderId = await googleDriveService.ensureCompanyFolderStructure(
+        saidasFolderId = await googleDriveService.ensureCompanyFolderStructure(
           baseFolderId,
           invoice.company_name,
           year,
           month,
-          'XMLs'
+          'Saidas',
+          invoice.company_cnpj
         );
 
         const uploadXmlRes = await googleDriveService.uploadFile(
           invoice.xml_file_path,
           `${invoice.chave_acesso}.xml`,
-          xmlFolderId,
+          saidasFolderId,
           'application/xml'
         );
 
@@ -320,20 +323,23 @@ export class SefazService {
         }
       }
 
-      // 2. Upload PDF
+      // 2. Upload PDF into <pasta do cliente>/SETOR FISCAL/NFe/AAAA/MM/Saidas
       if (invoice.pdf_file_path && fs.existsSync(invoice.pdf_file_path)) {
-        const pdfFolderId = await googleDriveService.ensureCompanyFolderStructure(
-          baseFolderId,
-          invoice.company_name,
-          year,
-          month,
-          'PDFs'
-        );
+        if (!saidasFolderId) {
+          saidasFolderId = await googleDriveService.ensureCompanyFolderStructure(
+            baseFolderId,
+            invoice.company_name,
+            year,
+            month,
+            'Saidas',
+            invoice.company_cnpj
+          );
+        }
 
         const uploadPdfRes = await googleDriveService.uploadFile(
           invoice.pdf_file_path,
           `DANFE_${invoice.chave_acesso}.pdf`,
-          pdfFolderId,
+          saidasFolderId,
           'application/pdf'
         );
 

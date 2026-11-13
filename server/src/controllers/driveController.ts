@@ -1,6 +1,8 @@
+import path from 'path';
 import { Request, Response } from 'express';
 import { googleDriveService } from '../services/googleDriveService.js';
 import { db } from '../database/db.js';
+import { getClientFolderInGDrive } from '../utils/driveFolderMatcher.js';
 
 export const driveController = {
   /**
@@ -33,11 +35,35 @@ export const driveController = {
   },
 
   /**
-   * List folders in Google Drive
+   * List folders in Google Drive (or locate existing client folder by CNPJ)
    */
   async listFolders(req: Request, res: Response) {
     try {
       const parentId = String(req.query.parentId || 'root');
+      const cnpj = req.query.cnpj ? String(req.query.cnpj).trim() : '';
+      const companyName = req.query.companyName ? String(req.query.companyName).trim() : '';
+
+      if (cnpj) {
+        if (googleDriveService.getStatus().isConfigured) {
+          const matched = await googleDriveService.findClientFolderByCnpj(cnpj, parentId, companyName);
+          return res.json({
+            success: true,
+            data: matched ? [matched] : [],
+            matchedFolder: matched,
+          });
+        }
+
+        const localFolder = getClientFolderInGDrive(companyName, cnpj);
+        const folderItem = localFolder
+          ? { id: localFolder, name: path.basename(localFolder), mimeType: 'application/vnd.google-apps.folder' }
+          : null;
+        return res.json({
+          success: true,
+          data: folderItem ? [folderItem] : [],
+          matchedFolder: folderItem,
+        });
+      }
+
       const folders = await googleDriveService.listFolders(parentId);
       return res.json({ success: true, data: folders });
     } catch (err: any) {
