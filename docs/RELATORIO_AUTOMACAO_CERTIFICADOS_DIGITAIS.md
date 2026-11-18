@@ -21,7 +21,7 @@ Foi desenhado e implementado um **Fluxo de Ordem de Serviço em Duas Etapas Cone
 ┌─────────────────────────────────────────────────────────────┐
 │ FASE 1: FINANCEIRO (Responsável: Val)                       │
 │ - Viviane AI emite cobrança/boleto/PIX via conta AG7       │
-│ - Valor Padrão: R$ 179,00 (Certificado A1 PJ)               │
+│ - Valor Oficial Clientes Internos: R$ 235,00 (Certificado A1 PJ) │
 │ - Disparo automático no WhatsApp do cliente                 │
 └─────────────────────────────┬───────────────────────────────┘
                               │
@@ -79,7 +79,7 @@ O teste de validação real executado no container `viaos` contra o banco Postgr
 * **Fase 1 (Financeiro):**
   - Responsável: **Val**
   - Cedente: **AG7 CONSULTORIA EDUCACAO E MARKETING LTDA** (CNPJ: `49.216.709/0001-18`)
-  - Valor: **R$ 179,00**
+  - Valor: **R$ 235,00** (Preço oficial para clientes internos Viacont)
   - Chave PIX: `49216709000118`
   - Código PIX Copia-e-Cola e Linha Digitável gerados e validados.
 * **Transição (Gatilho de Pagamento):**
