@@ -17,6 +17,7 @@ import { bpoController } from '../controllers/bpoController.js';
 import { tenantsController } from '../controllers/tenantsController.js';
 import { portalController } from '../controllers/portalController.js';
 import { webhookController } from '../controllers/webhookController.js';
+import { nfseOrderController } from '../controllers/nfseOrderController.js';
 import { verifyJwtAndTenant, requireAdmin, requireMaster, optionalJwtOrPublicDoc } from '../middleware/authMiddleware.js';
 import { db } from '../database/db.js';
 
@@ -124,6 +125,13 @@ router.get('/nfse/monthly-report/:companyId/:mesAno/pdf', optionalJwtOrPublicDoc
 router.get('/nfse/monthly-summary/:companyId/:mesAno', verifyJwtAndTenant, nfseController.getMonthlySummary);
 router.post('/nfse/batch-sync-month', verifyJwtAndTenant, nfseController.batchSyncMonth);
 router.post('/nfse/sync-all-cities', verifyJwtAndTenant, nfseController.syncAllCities);
+
+// Módulo de Emissão de NFS-e a Pedido do Cliente (Desenho 20/11/2026: ViaNFe + Viviane + ViaOS)
+router.post('/nfse/pedidos', nfseOrderController.criarPedido);
+router.get('/nfse/pedidos/:protocolo', nfseOrderController.consultarPedido);
+router.get('/nfse/pedidos/:protocolo/previa', nfseOrderController.baixarPreviaPdf);
+router.get('/nfse/perfis/:cnpj', verifyJwtAndTenant, nfseOrderController.consultarPerfil);
+router.post('/nfse/perfis', verifyJwtAndTenant, nfseOrderController.salvarPerfil);
 
 
 // ============================================================================

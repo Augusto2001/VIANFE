@@ -804,6 +804,54 @@ export function initDatabase() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (categoria_id) REFERENCES financial_categories(id) ON DELETE CASCADE
     );
+
+    -- PERFIS FISCAIS DE CLIENTE PARA EMISSÃO DE NFS-E (PADRÃO NACIONAL ADN)
+    CREATE TABLE IF NOT EXISTS client_nfse_profiles (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      tenant_id TEXT DEFAULT 'tenant_viacont_master',
+      cnpj_prestador TEXT NOT NULL UNIQUE,
+      item_servico_lc116 TEXT NOT NULL, -- ex: '17.01'
+      codigo_tributacao_nacional TEXT NOT NULL, -- ex: '170101'
+      aliquota_iss REAL NOT NULL DEFAULT 5.0,
+      iss_retido INTEGER DEFAULT 0,
+      codigo_municipio_padrao TEXT DEFAULT '2927408',
+      descricao_servico_padrao TEXT,
+      limite_valor_nota REAL DEFAULT 50000.0,
+      optante_simples_nacional TEXT DEFAULT '1', -- '1' Sim, '2' Não
+      exige_aprovacao_viaos INTEGER DEFAULT 1,
+      ativo INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_nfse_prof_cnpj ON client_nfse_profiles(cnpj_prestador);
+
+    -- PEDIDOS DE EMISSÃO DE NFS-E (SOLICITADOS VIA WHATSAPP / VIVIANE)
+    CREATE TABLE IF NOT EXISTS nfse_order_requests (
+      id TEXT PRIMARY KEY,
+      protocolo TEXT UNIQUE NOT NULL,
+      company_id TEXT NOT NULL,
+      cnpj_prestador TEXT NOT NULL,
+      tomador_doc TEXT NOT NULL,
+      tomador_nome TEXT NOT NULL,
+      valor_servicos REAL NOT NULL,
+      discriminacao TEXT NOT NULL,
+      status TEXT DEFAULT 'PENDENTE_CONFERENCIA', -- 'PENDENTE_CONFERENCIA' | 'AGUARDANDO_APROVACAO' | 'APROVADO' | 'REJEITADO' | 'EMITIDO' | 'COM_IMPEDIMENTO'
+      motivo_pendencia TEXT,
+      dps_xml TEXT,
+      dps_id TEXT,
+      previa_pdf_path TEXT,
+      viaos_tarefa_id TEXT,
+      solicitante_telefone TEXT,
+      solicitante_origem TEXT DEFAULT 'viviane_whatsapp', -- 'viviane_whatsapp' | 'portal' | 'manual'
+      ambiente TEXT DEFAULT 'producao',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_nfse_orders_cnpj ON nfse_order_requests(cnpj_prestador, status);
+    CREATE INDEX IF NOT EXISTS idx_nfse_orders_proto ON nfse_order_requests(protocolo);
   `);
 
   // Migrações de colunas para bloqueio e carência SEFAZ

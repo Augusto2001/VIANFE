@@ -32,6 +32,7 @@ export interface DanfsePdfItem {
   competencia?: string;
   dataVencimento?: string;
   isCancelada?: boolean;
+  isPrevia?: boolean;
 }
 
 export interface MonthlyConferenceData {
@@ -138,8 +139,10 @@ export const nfsePdfGenerator = {
       doc.font('Helvetica-Bold').fontSize(8.5)
         .text('SECRETARIA MUNICIPAL DA FAZENDA', headerTextX, hY + 28, { width: headerTextW, align: 'center' });
 
-      doc.font('Helvetica-Bold').fontSize(9.5)
-        .text('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - Nota Salvador', headerTextX, hY + 48, { width: headerTextW, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 8.5 : 9.5)
+        .fillColor(data.isPrevia ? '#B91C1C' : '#000000')
+        .text(data.isPrevia ? 'PRÉVIA DE DECLARAÇÃO DE SERVIÇOS (DPS) — NÃO TRANSMITIDA' : 'NOTA FISCAL DE SERVIÇOS ELETRÔNICA - Nota Salvador', headerTextX, hY + 48, { width: headerTextW, align: 'center' });
+      doc.fillColor('#000000');
 
       // Linha vertical separadora da caixa da direita
       const boxRightX = right - 140;
@@ -159,11 +162,12 @@ export const nfsePdfGenerator = {
       doc.font('Helvetica-Bold').fontSize(8).text(dtStr, bPadX, hY + 37);
 
       doc.font('Helvetica').fontSize(7).text('Código de Verificação:', bPadX, hY + 50);
-      let codVerif = String(data.codigoVerificacao || 'N/A').toUpperCase();
-      if (codVerif.length === 8 && !codVerif.includes('-')) {
+      let codVerif = data.isPrevia ? 'NÃO EMITIDA (PRÉVIA)' : String(data.codigoVerificacao || 'N/A').toUpperCase();
+      if (!data.isPrevia && codVerif.length === 8 && !codVerif.includes('-')) {
         codVerif = `${codVerif.substring(0, 4)}-${codVerif.substring(4, 8)}`;
       }
-      doc.font('Helvetica-Bold').fontSize(9).text(codVerif, bPadX, hY + 59);
+      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 6.5 : 9).fillColor(data.isPrevia ? '#B91C1C' : '#000000').text(codVerif, bPadX, hY + 59);
+      doc.fillColor('#000000');
 
       // ==========================================
       // 2. PRESTADOR DE SERVIÇOS - Y: 96 a 178 (h: 82)
@@ -364,12 +368,21 @@ export const nfsePdfGenerator = {
       doc.text(`- Código de Tributação do Município: ${codTrib}`, left + 8, infoY + 42);
       doc.text('- Os valores de PIS/COFINS referem-se aos Valores de Apuração Própria, conforme Nota Técnica nº 07 do IBS/CBS.', left + 8, infoY + 56);
 
-      // Marca d\'água de Cancelamento se cancelada
+      // Marca d'água de Cancelamento se cancelada
       if (data.isCancelada) {
         doc.save();
         doc.rotate(-35, { origin: [300, 400] });
         doc.fontSize(60).fillColor('#ef4444', 0.25).font('Helvetica-Bold')
           .text('NFS-e CANCELADA', 100, 380, { align: 'center', width: 400 });
+        doc.restore();
+      }
+
+      // Marca d'água de Prévia se isPrevia (Item 3 do Desenho NFS-e 20/11/2026)
+      if (data.isPrevia) {
+        doc.save();
+        doc.rotate(-35, { origin: [300, 400] });
+        doc.fontSize(38).fillColor('#dc2626', 0.22).font('Helvetica-Bold')
+          .text('PRÉVIA PARA CONFERÊNCIA\nDOCUMENTO NÃO TRANSMITIDO', 50, 360, { align: 'center', width: 500 });
         doc.restore();
       }
 
