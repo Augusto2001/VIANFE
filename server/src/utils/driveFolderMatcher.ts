@@ -75,6 +75,17 @@ export const KNOWN_FOLDER_ALIASES: FolderAliasMapping[] = [
       'BOM TODO COMERCIO VAREJISTA EIRELI'
     ],
     folderName: 'BOM TODO COMERCIO VAREJISTA EIRELI ME ( 4 ) (SN) ( 11 )'
+  },
+  {
+    cnpj: '43855131000163',
+    aliases: [
+      'BIAPELL',
+      'BIAPELL PRESENTES',
+      'LENO',
+      'LENO-ANTIGA DUBAI',
+      'DUBAI'
+    ],
+    folderName: 'BIAPELL PRESENTES COMERCIO  (LENO-ANTIGA DUBAI) (SN) ( 20 )'
   }
 ];
 
