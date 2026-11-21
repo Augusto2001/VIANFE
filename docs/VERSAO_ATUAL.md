@@ -7,6 +7,7 @@ Leia o relatório atual: [versão 1.11 — Motor Determinístico de Pedidos de N
 - **1** identifica a proposta funcional registrada nesta série: emissão segura de NFS-e, captura fiscal DFe e integrações autenticadas.
 - **11** identifica onze rodadas de ajustes posteriores à implementação inicial.
 - Não é uma reconstrução da numeração histórica do produto. O `1.0.0` dos pacotes npm é uma versão técnica anterior, sem esse significado operacional.
+- Base anterior: `84a4e9410bf2f9ce457af9dcaba4befcc1fd5c44`. Commit atual publicado: `ab5b147895b032b23906ebe90a45c92c23be0037`. Para o commit atual, conferir GitHub/main e a revisão da imagem ativa na Oracle.
 - Metadados para ferramentas: [versao-operacional.json](../versao-operacional.json).
 
 ## Regra para todas as IAs

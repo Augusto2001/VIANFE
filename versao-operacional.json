@@ -4,8 +4,8 @@
   "inicio_da_serie": "2026-11-20",
   "proposta": "Motor de Emissão de NFS-e a Pedido do Cliente (ViaNFe + Viviane + ViaOS) com Prévia da DPS e Trava de Alçada",
   "commit_base_anterior": "84a4e9410bf2f9ce457af9dcaba4befcc1fd5c44",
-  "commit_publicado": "",
-  "estado": "em_homologacao",
+  "commit_publicado": "ab5b147895b032b23906ebe90a45c92c23be0037",
+  "estado": "publicado_e_validado_em_producao",
   "documento": "docs/versoes/1.11.md",
   "workflow_id": "4Wn1e4VIXmBFUs0V",
   "workflow_versao_publicada": "0e3efb18-96a2-4769-a4fb-cf40436c957b"
