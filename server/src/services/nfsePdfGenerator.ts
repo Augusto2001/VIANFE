@@ -123,37 +123,48 @@ export const nfsePdfGenerator = {
       const hHeight = 74;
       doc.rect(left, hY, width, hHeight).stroke();
 
-      // Brasão oficial de Salvador
-      try {
-        const brasaoBuffer = Buffer.from(BRASAO_SALVADOR_BASE64, 'base64');
-        doc.image(brasaoBuffer, left + 10, hY + 7, { width: 60, height: 60 });
-      } catch (_) {}
+      // Brasão oficial apenas em notas autorizadas (nunca em prévia — contrato NFSE_EMISSAO_SEGURA)
+      if (!data.isPrevia) {
+        try {
+          const brasaoBuffer = Buffer.from(BRASAO_SALVADOR_BASE64, 'base64');
+          doc.image(brasaoBuffer, left + 10, hY + 7, { width: 60, height: 60 });
+        } catch (_) {}
+      }
 
       // Texto Central do Cabeçalho
-      const headerTextX = left + 75;
-      const headerTextW = width - 75 - 145;
+      const headerTextX = data.isPrevia ? left + 10 : left + 75;
+      const headerTextW = data.isPrevia ? width - 155 : width - 75 - 145;
 
-      doc.font('Helvetica-Bold').fontSize(12).fillColor('#000000')
-        .text('PREFEITURA MUNICIPAL DO SALVADOR', headerTextX, hY + 12, { width: headerTextW, align: 'center' });
-      
-      doc.font('Helvetica-Bold').fontSize(8.5)
-        .text('SECRETARIA MUNICIPAL DA FAZENDA', headerTextX, hY + 28, { width: headerTextW, align: 'center' });
+      if (data.isPrevia) {
+        doc.rect(left + 1, hY + 1, width - 142, 22).fill('#FEE2E2');
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('#991B1B')
+          .text('PRÉVIA DE PEDIDO DE NFS-e — SEM VALOR FISCAL', headerTextX, hY + 7, { width: headerTextW, align: 'center' });
+        doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#B91C1C')
+          .text('DOCUMENTO PARA CONFERÊNCIA INTERNA — NÃO TRANSMITIDO À PREFEITURA / PORTAL NACIONAL', headerTextX, hY + 32, { width: headerTextW, align: 'center' });
+        doc.fillColor('#000000');
+      } else {
+        doc.font('Helvetica-Bold').fontSize(12).fillColor('#000000')
+          .text('PREFEITURA MUNICIPAL DO SALVADOR', headerTextX, hY + 12, { width: headerTextW, align: 'center' });
+        
+        doc.font('Helvetica-Bold').fontSize(8.5)
+          .text('SECRETARIA MUNICIPAL DA FAZENDA', headerTextX, hY + 28, { width: headerTextW, align: 'center' });
 
-      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 8.5 : 9.5)
-        .fillColor(data.isPrevia ? '#B91C1C' : '#000000')
-        .text(data.isPrevia ? 'PRÉVIA DE DECLARAÇÃO DE SERVIÇOS (DPS) — NÃO TRANSMITIDA' : 'NOTA FISCAL DE SERVIÇOS ELETRÔNICA - Nota Salvador', headerTextX, hY + 48, { width: headerTextW, align: 'center' });
-      doc.fillColor('#000000');
+        doc.font('Helvetica-Bold').fontSize(9.5)
+          .fillColor('#000000')
+          .text('NOTA FISCAL DE SERVIÇOS ELETRÔNICA - Nota Salvador', headerTextX, hY + 48, { width: headerTextW, align: 'center' });
+        doc.fillColor('#000000');
+      }
 
       // Linha vertical separadora da caixa da direita
       const boxRightX = right - 140;
       doc.moveTo(boxRightX, hY).lineTo(boxRightX, hY + hHeight).stroke();
 
-      // Dados da Nota (Caixa Direita)
+      // Dados da Nota / Prévia (Caixa Direita)
       const bPadX = boxRightX + 6;
-      doc.font('Helvetica').fontSize(7).text('Número da Nota:', bPadX, hY + 6);
-      doc.font('Helvetica-Bold').fontSize(9).text(numPad8, bPadX, hY + 15);
+      doc.font('Helvetica').fontSize(7).text(data.isPrevia ? 'Protocolo do Pedido:' : 'Número da Nota:', bPadX, hY + 6);
+      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 8 : 9).text(data.isPrevia ? String(data.numero || 'SEM PROTOCOLO') : numPad8, bPadX, hY + 15);
 
-      doc.font('Helvetica').fontSize(7).text('Data e Hora de Emissão:', bPadX, hY + 28);
+      doc.font('Helvetica').fontSize(7).text(data.isPrevia ? 'Gerado em:' : 'Data e Hora de Emissão:', bPadX, hY + 28);
       let dtStr = data.dataEmissao || new Date().toLocaleString('pt-BR');
       if (dtStr.includes('T')) {
         const dObj = new Date(dtStr);
@@ -161,12 +172,12 @@ export const nfsePdfGenerator = {
       }
       doc.font('Helvetica-Bold').fontSize(8).text(dtStr, bPadX, hY + 37);
 
-      doc.font('Helvetica').fontSize(7).text('Código de Verificação:', bPadX, hY + 50);
-      let codVerif = data.isPrevia ? 'NÃO EMITIDA (PRÉVIA)' : String(data.codigoVerificacao || 'N/A').toUpperCase();
+      doc.font('Helvetica').fontSize(7).text(data.isPrevia ? 'Situação:' : 'Código de Verificação:', bPadX, hY + 50);
+      let codVerif = data.isPrevia ? 'PRÉVIA / NÃO EMITIDA' : String(data.codigoVerificacao || 'N/A').toUpperCase();
       if (!data.isPrevia && codVerif.length === 8 && !codVerif.includes('-')) {
         codVerif = `${codVerif.substring(0, 4)}-${codVerif.substring(4, 8)}`;
       }
-      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 6.5 : 9).fillColor(data.isPrevia ? '#B91C1C' : '#000000').text(codVerif, bPadX, hY + 59);
+      doc.font('Helvetica-Bold').fontSize(data.isPrevia ? 7 : 9).fillColor(data.isPrevia ? '#B91C1C' : '#000000').text(codVerif, bPadX, hY + 59);
       doc.fillColor('#000000');
 
       // ==========================================
@@ -242,7 +253,9 @@ export const nfsePdfGenerator = {
       const vHeight = 22;
       doc.rect(left, vY, width, vHeight).stroke();
 
-      const valTotalStr = `VALOR TOTAL DA NOTA = R$${formatCurrency(data.valorServicos)}`;
+      const valTotalStr = data.isPrevia
+        ? `VALOR PREVISTO DOS SERVIÇOS (PRÉVIA) = R$${formatCurrency(data.valorServicos)}`
+        : `VALOR TOTAL DA NOTA = R$${formatCurrency(data.valorServicos)}`;
       doc.font('Helvetica-Bold').fontSize(11).fillColor('#000000')
         .text(valTotalStr, left, vY + 6, { width: width, align: 'center' });
 
@@ -361,12 +374,21 @@ export const nfsePdfGenerator = {
 
       const infoY = oY + 24;
       doc.font('Helvetica').fontSize(7.5).fillColor('#000000');
-      doc.text('- Esta Nota Salvador foi emitida com respaldo na Lei 7.186/2006.', left + 8, infoY);
-      doc.text(`- Data de vencimento do ISS desta Nota Salvador: ${data.dataVencimento || '05 do mês subsequente'}`, left + 8, infoY + 14);
-      doc.text(`- COMPETÊNCIA: ${data.competencia || '09/2026'} (mês/ano)`, left + 8, infoY + 28);
-      const codTrib = data.itemServico ? `${data.itemServico} - Serviços homologados` : 'Serviços homologados no Município de Salvador';
-      doc.text(`- Código de Tributação do Município: ${codTrib}`, left + 8, infoY + 42);
-      doc.text('- Os valores de PIS/COFINS referem-se aos Valores de Apuração Própria, conforme Nota Técnica nº 07 do IBS/CBS.', left + 8, infoY + 56);
+      if (data.isPrevia) {
+        doc.font('Helvetica-Bold').fillColor('#B91C1C')
+          .text('- ATENÇÃO: PRÉVIA PARA CONFERÊNCIA INTERNA. NÃO É NOTA FISCAL AUTORIZADA E NÃO FOI TRANSMITIDA.', left + 8, infoY);
+        doc.font('Helvetica').fillColor('#000000');
+        doc.text('- Nenhum número oficial de NFS-e, RPS ou código de verificação foi gerado ou enviado à prefeitura / Portal Nacional.', left + 8, infoY + 14);
+        doc.text(`- COMPETÊNCIA PREVISTA: ${data.competencia || 'N/A'} (mês/ano)`, left + 8, infoY + 28);
+        doc.text(`- Serviço / Tributação (perfil): ${data.itemServico || 'Conforme perfil fiscal'}`, left + 8, infoY + 42);
+      } else {
+        doc.text('- Esta Nota Salvador foi emitida com respaldo na Lei 7.186/2006.', left + 8, infoY);
+        doc.text(`- Data de vencimento do ISS desta Nota Salvador: ${data.dataVencimento || '05 do mês subsequente'}`, left + 8, infoY + 14);
+        doc.text(`- COMPETÊNCIA: ${data.competencia || '09/2026'} (mês/ano)`, left + 8, infoY + 28);
+        const codTrib = data.itemServico ? `${data.itemServico} - Serviços homologados` : 'Serviços homologados no Município de Salvador';
+        doc.text(`- Código de Tributação do Município: ${codTrib}`, left + 8, infoY + 42);
+        doc.text('- Os valores de PIS/COFINS referem-se aos Valores de Apuração Própria, conforme Nota Técnica nº 07 do IBS/CBS.', left + 8, infoY + 56);
+      }
 
       // Marca d'água de Cancelamento se cancelada
       if (data.isCancelada) {
@@ -381,8 +403,8 @@ export const nfsePdfGenerator = {
       if (data.isPrevia) {
         doc.save();
         doc.rotate(-35, { origin: [300, 400] });
-        doc.fontSize(38).fillColor('#dc2626', 0.22).font('Helvetica-Bold')
-          .text('PRÉVIA PARA CONFERÊNCIA\nDOCUMENTO NÃO TRANSMITIDO', 50, 360, { align: 'center', width: 500 });
+        doc.fontSize(34).fillColor('#dc2626', 0.24).font('Helvetica-Bold')
+          .text('PRÉVIA PARA CONFERÊNCIA\nSEM VALOR FISCAL — NÃO TRANSMITIDO', 40, 355, { align: 'center', width: 520 });
         doc.restore();
       }
 

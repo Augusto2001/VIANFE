@@ -2,6 +2,7 @@ import { integrationVaultService } from '../services/integrationVaultService.js'
 import { hiperSyncWorker } from '../services/hiperSyncWorker.js';
 import { contaAzulWorker } from '../services/contaAzulWorker.js';
 import { nfseAccess } from '../middleware/nfseAccess.js';
+import { requireNfseOrderAuth } from '../middleware/nfseOrderAuth.js';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -127,9 +128,9 @@ router.post('/nfse/batch-sync-month', verifyJwtAndTenant, nfseController.batchSy
 router.post('/nfse/sync-all-cities', verifyJwtAndTenant, nfseController.syncAllCities);
 
 // Módulo de Emissão de NFS-e a Pedido do Cliente (Desenho 20/11/2026: ViaNFe + Viviane + ViaOS)
-router.post('/nfse/pedidos', nfseOrderController.criarPedido);
-router.get('/nfse/pedidos/:protocolo', nfseOrderController.consultarPedido);
-router.get('/nfse/pedidos/:protocolo/previa', nfseOrderController.baixarPreviaPdf);
+router.post('/nfse/pedidos', requireNfseOrderAuth, nfseOrderController.criarPedido);
+router.get('/nfse/pedidos/:protocolo', requireNfseOrderAuth, nfseOrderController.consultarPedido);
+router.get('/nfse/pedidos/:protocolo/previa', requireNfseOrderAuth, nfseOrderController.baixarPreviaPdf);
 router.get('/nfse/perfis/:cnpj', verifyJwtAndTenant, nfseOrderController.consultarPerfil);
 router.post('/nfse/perfis', verifyJwtAndTenant, nfseOrderController.salvarPerfil);
 

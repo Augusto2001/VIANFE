@@ -19,6 +19,7 @@ export const nfseOrderController = {
         descricao,
         solicitante_telefone,
         solicitante_origem,
+        protocolo_zapcont,
         ambiente
       } = req.body;
 
@@ -37,6 +38,7 @@ export const nfseOrderController = {
         });
       }
 
+      const tenantId = (req as any).user?.tenant_id;
       const resultado = await NfseOrderService.processOrder({
         cnpj_prestador,
         tomador_doc,
@@ -45,10 +47,13 @@ export const nfseOrderController = {
         descricao,
         solicitante_telefone,
         solicitante_origem: solicitante_origem || 'viviane_whatsapp',
-        ambiente: ambiente || 'producao'
+        protocolo_zapcont: protocolo_zapcont ? String(protocolo_zapcont).trim() : undefined,
+        ambiente: ambiente === 'homologacao' ? 'homologacao' : 'producao',
+        tenant_id: tenantId
       });
 
-      res.status(resultado.sucesso ? 201 : 422).json(resultado);
+      const statusCode = resultado.duplicado ? 409 : (resultado.sucesso ? 201 : 422);
+      res.status(statusCode).json(resultado);
     } catch (err: any) {
       console.error('[nfseOrderController] Erro ao criar pedido de NFS-e:', err);
       res.status(500).json({ sucesso: false, erro: err.message });
@@ -62,7 +67,14 @@ export const nfseOrderController = {
   async consultarPedido(req: Request, res: Response) {
     try {
       const protocolo = String(req.params.protocolo || '');
-      const order = db.prepare('SELECT * FROM nfse_order_requests WHERE protocolo = ?').get(protocolo) as any;
+      const tenantId = (req as any).user?.tenant_id;
+      const order = tenantId
+        ? db.prepare(`
+            SELECT r.* FROM nfse_order_requests r
+            JOIN companies c ON c.id = r.company_id
+            WHERE r.protocolo = ? AND c.tenant_id = ?
+          `).get(protocolo, tenantId) as any
+        : db.prepare('SELECT * FROM nfse_order_requests WHERE protocolo = ?').get(protocolo) as any;
 
       if (!order) {
         return res.status(404).json({ sucesso: false, erro: `Pedido não encontrado para o protocolo ${protocolo}.` });
@@ -77,6 +89,7 @@ export const nfseOrderController = {
           tomador_nome: order.tomador_nome,
           valor_servicos: order.valor_servicos,
           status: order.status,
+          ambiente: order.ambiente,
           motivo_pendencia: order.motivo_pendencia,
           viaos_tarefa_id: order.viaos_tarefa_id,
           tem_previa_pdf: Boolean(order.previa_pdf_path && fs.existsSync(order.previa_pdf_path)),
@@ -96,7 +109,14 @@ export const nfseOrderController = {
   async baixarPreviaPdf(req: Request, res: Response) {
     try {
       const protocolo = String(req.params.protocolo || '');
-      const order = db.prepare('SELECT * FROM nfse_order_requests WHERE protocolo = ?').get(protocolo) as any;
+      const tenantId = (req as any).user?.tenant_id;
+      const order = tenantId
+        ? db.prepare(`
+            SELECT r.* FROM nfse_order_requests r
+            JOIN companies c ON c.id = r.company_id
+            WHERE r.protocolo = ? AND c.tenant_id = ?
+          `).get(protocolo, tenantId) as any
+        : db.prepare('SELECT * FROM nfse_order_requests WHERE protocolo = ?').get(protocolo) as any;
 
       if (!order || !order.previa_pdf_path || !fs.existsSync(order.previa_pdf_path)) {
         return res.status(404).json({ sucesso: false, erro: 'Arquivo PDF da prévia não encontrado para este pedido.' });

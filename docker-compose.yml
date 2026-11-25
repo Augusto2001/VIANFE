@@ -44,6 +44,9 @@ services:
       DATABASE_URL: postgres://vianfe_user:${POSTGRES_PASSWORD:-vianfe_secure_pg_pass_2026}@vianfe-postgres:5432/vianfe_db
       REDIS_URL: redis://vianfe-redis:6379
       JWT_SECRET: ${JWT_SECRET:?Configure um segredo JWT privado na Oracle}
+      VIAOS_API_URL: ${VIAOS_API_URL:-http://viaos:3333}
+      VIAOS_JWT_SECRET: ${VIAOS_JWT_SECRET:-}
+      NFSE_ORDERS_SERVICE_TOKEN: ${NFSE_ORDERS_SERVICE_TOKEN:-}
       SEFAZ_RELAY_URL: ${SEFAZ_RELAY_URL:-https://sefaz-relay.contadordev.com.br}
       APP_DOMAIN: ${APP_DOMAIN:-https://vianfe.contadordev.com.br}
     volumes:
